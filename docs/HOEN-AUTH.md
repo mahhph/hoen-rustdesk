@@ -14,6 +14,8 @@ Use only the authenticated encrypted native TCP path with negotiated key-exchang
 
 Existing `secure_connection` return values and `is_secured` are not sufficient evidence: legacy fallback can return a public key without completing the intended encrypted handshake. Capture an explicit verified context only after successful signature verification and `set_negotiated_key`. `Stream::Tcp` also wraps some KCP and relay paths, so retain explicit transport provenance and approved-interface evidence from connection creation. Never infer direct LAN admission from the stream enum alone. In Hoen mode, use the mailbox-pinned host signing key as the trust anchor rather than requiring a public rendezvous lookup.
 
+The current direct IP/domain client path returns before `secure_connection`, so it needs an explicit Hoen handshake rather than a flag applied to the old path. The registry currently stores only a fingerprint; upstream `SignedId` does not expose the long-term verification key. Proposed protocol addition: an optional raw host verification-key field on `SignedId`, populated in Hoen mode. The viewer first checks SHA-256 of that exact 32-byte key against the authenticated mailbox pin, then verifies the signature and derives the channel context. Merely carrying the key in a message proves nothing without the pin/signature checks. The signed RustDesk ID differs from the socket IP; Hoen must keep endpoint addressing separate from identity and anchor identity in the pinned key. The host's direct listener must explicitly select the secure handshake in Hoen mode.
+
 Define `channelBinding` as lowercase hex SHA-256 of this fixed binary concatenation:
 
 1. ASCII `hoen-mailbox-channel/v1` followed by one zero byte.

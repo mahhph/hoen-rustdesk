@@ -3,6 +3,8 @@
 //! This library does not authenticate a transport or grant. Callers must obtain
 //! the inputs from a successfully verified native TCP handshake, verify the host
 //! key against the mailbox pin, and perform the separate grant-consumption checks.
+pub mod mailbox;
+
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 

@@ -50,7 +50,7 @@ For an isolated setup, pick a writable user-owned tools directory and avoid chan
 
 Official Python 3.12.10 x64 **embeddable** ZIP was extracted to `%LOCALAPPDATA%\HoenBuildTools\python-3.12.10`. Its MD5 matched the [python.org release listing](https://www.python.org/downloads/release/python-31210/) (`fe8ef205f2e9c3ba44d0cf9954e1abd3`); computed SHA-256 is `4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3`. `python.exe --version` and `build.py --print-features` succeeded. This isolated distribution has no `pip`; packaging steps that require pip need a separately provisioned full per-user Python or another verified approach.
 
-Official Flutter 3.24.5 x64 archive was extracted to `%LOCALAPPDATA%\HoenBuildTools\flutter-3.24.5\flutter`. Its SHA-256 `b8a7485acd3c6fb23a76b7ac09f89e8d93d62fbff7147c6f5f8c5686d949eeac` matched the [official Windows release manifest](https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json); framework revision `dec2ee5c1f98f8e84a7d5380c05eb8a3d0a81668` and `flutter --version` were verified. This is stock Flutter; CI's custom engine and patch are still unapplied.
+Official Flutter 3.24.5 x64 archive was extracted to `%LOCALAPPDATA%\HoenBuildTools\flutter-3.24.5\flutter`. Its SHA-256 `b8a7485acd3c6fb23a76b7ac09f89e8d93d62fbff7147c6f5f8c5686d949eeac` matched the [official Windows release manifest](https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json); framework revision `dec2ee5c1f98f8e84a7d5380c05eb8a3d0a81668` and `flutter --version` were verified. The root task later applied the checked-in dropdown patch and installed the custom x64 engine as documented below.
 
 To use these installations in the current PowerShell process only:
 
@@ -61,4 +61,24 @@ $env:RUSTUP_TOOLCHAIN = '1.75.0-x86_64-pc-windows-msvc'
 .\scripts\hoen-build-preflight.ps1
 ```
 
-With those process-local variables, the preflight recognizes Python and Flutter. LLVM/Clang, pinned vcpkg and its packages, the generated bridge artifact, and custom Flutter engine/patch remain unresolved. No build, host service, or firewall action was performed.
+With those process-local variables, the preflight recognizes Python and Flutter. LLVM/Clang and pinned vcpkg are now installed locally; vcpkg package builds are in progress. The matching bridge artifacts were restored as described below; the custom Flutter engine and patch are installed as documented below. No build, host service, or firewall action was performed.
+
+### Matching bridge artifact restored
+
+The parent task restored the six expected generated paths without overwriting existing files from successful CI run `42115480465`, source commit `0272f0270767f839e828a68861635df517e6eeaf`, artifact `13456556600`, archive SHA-256 `92acc800f0994474c7d74bd74843e54957060e1ebc8f01c4d4f09107d0f93f2f`. The generated files are ignored by Git. Confirm that the build's source commit matches that CI commit and that later FFI changes do not make the artifact stale; file presence alone does not establish compatibility. Windows and ARM64 Mac bridge artifacts were published by that run.
+
+### Native prerequisites on Lenovo
+
+The user-local vcpkg checkout at `%LOCALAPPDATA%\HoenBuildTools\vcpkg` is bootstrapped at commit `9e593bb18ea69cc5095e012465dcd675a822ed0d`. Bootstrap validated the downloaded executable signature; vcpkg executable SHA-256 is `13b8175e99a884c5ad34249218754b45541a1a63f216e92603aee57a285ac741`. LLVM 15.0.6 was extracted without running its installer to `%LOCALAPPDATA%\HoenBuildTools\llvm-15.0.6`; `clang --version` reports 15.0.6. The official LLVM archive SHA-256 `22e2f2c38be4c44db7a1e9da5e67de2a453c5b4be9cf91e139592a63877ac0a2` matched the [LLVM contributor's published hash](https://github.com/llvm/llvm-project/issues/152849). 7-Zip 25.01 was extracted into the same tools directory to unpack LLVM; no machine-wide installation or PATH change was made.
+
+The native vcpkg manifest build uses process-local `VCPKG_ROOT`, `VCPKG_DEFAULT_HOST_TRIPLET=x64-windows-static`, `LIBCLANG_PATH`, PATH and binary cache; its log is `%LOCALAPPDATA%\HoenBuildTools\vcpkg-native-build.log`. A successful bootstrap does not imply successful package builds. The active build is logged as `vcpkg-native-build-fifth.log`. Earlier attempts failed on Git lazy-fetch DNS errors and then a missing local cache directory; pinned port trees were fetched and the cache directory created before retry. Verify the active build exit status before assuming dependencies are ready. The preflight's package checks are not a substitute for that outcome. The custom x64 Flutter engine and dropdown patch are installed as documented below.
+
+
+
+### Flutter x64 engine and patch
+
+The root task ran `flutter precache --windows` successfully, applied the checked-in Flutter 3.24.5 dropdown patch after `git apply --check`, and confirmed its isolated SDK diff contains only that patch (9 additions, 1 deletion). It obtained the RustDesk custom x64 engine from official `rustdesk/engine` GitHub release asset `210168939` (63,301,215 bytes), validated the expected 10 flat archive entries, and installed them to the isolated SDK's `bin/cache/artifacts/engine/windows-x64-release`; replaced stock files were backed up to `%LOCALAPPDATA%\HoenBuildTools\flutter-engine-stock-backup`. The downloaded archive's computed SHA-256 is `ec8cabf36ee4ff24c8d98de25b00e70781eb03876265aee84d0fe554a110036e`. Upstream did not publish a digest for this asset, so this records the downloaded bytes rather than an independent checksum verification.
+
+### Flutter package resolution blocker
+
+The root task attempted `flutter pub get`. Dependency resolution and downloads ran, but the command exited 1 because Windows Developer Mode is not enabled for the process and Flutter requires symlink support. The user was asked to enable Developer Mode and Windows Settings was opened. This blocker must be rechecked after the setting changes; no application build is claimed. Generated plugin directories are ignored, and any tracked lockfile changes require review.

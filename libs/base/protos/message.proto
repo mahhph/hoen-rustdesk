@@ -86,7 +86,16 @@ message LoginRequest {
   string avatar = 17;
   bytes trusted_device_v2_token = 18;
   bool trusted_device_v2_supported = 19;
+  HoenProof hoen_proof = 20;
 }
+
+message HoenProof {
+  bytes viewer_key = 1;
+  bytes grant_token = 2;
+  bytes signature = 3;
+}
+
+message HoenKeyConfirmation { bytes channel_binding = 1; }
 
 message Terminal {
   string service_id = 1;  // Service ID for reconnecting to existing session
@@ -717,7 +726,10 @@ message PublicKey {
   uint32 kx_version = 3;
 }
 
-message SignedId { bytes id = 1; }
+message SignedId {
+  bytes id = 1;
+  bytes hoen_host_key = 2;
+}
 
 message AudioFormat {
   uint32 sample_rate = 1;
@@ -1037,5 +1049,6 @@ message Message {
     PortForwardChannel port_forward_channel = 33;
     // Auto Login: the peer types the password only if it is at its logon or lock screen.
     OSLogin os_login = 34;
+    HoenKeyConfirmation hoen_key_confirmation = 35;
   }
 }

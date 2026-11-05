@@ -14,6 +14,6 @@ cargo +1.75.0 test --locked --manifest-path libs/hoen-mailbox-history/Cargo.toml
 
 The crate is licensed under AGPL-3.0-only. Its local `.gitignore` excludes Cargo's `target/` build directory.
 
-The existing mailbox-generated certificate has no subject alternative name and is incompatible with strict hostname verification. Before integrated delivery, arrange a managed certificate reissue with an appropriate DNS or IP subject alternative name and provision its trust root; do not disable verification. No live certificate was changed.
+Legacy mailbox-generated certificates without a subject alternative name are incompatible with strict hostname verification. New mailbox source generates a SAN for the explicit listen host, preserving existing certificates. Before using a legacy deployment for integrated delivery, arrange a managed certificate reissue with an appropriate DNS or IP subject alternative name and provision its trust root and client pins; do not disable verification. No live certificate was changed.
 
 Outboxes created by the earlier pre-reservation prototype require explicit migration: they do not contain enough state to reconstruct active sessions safely. The library returns `MigrationRequired` without deleting their events. Recovery must preserve the old data and reconcile active sessions before replacing that database.

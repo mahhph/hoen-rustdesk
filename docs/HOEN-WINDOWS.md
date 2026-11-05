@@ -1,6 +1,6 @@
 # Hoen Windows host: build and integration notes
 
-Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset, and Flutter, CMake, Ninja, Clang, and protoc were not found on PATH. Python command names resolve to WindowsApps aliases, not a verified working Python interpreter. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
+Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset and Clang and protoc were not found on PATH. Visual Studio provides CMake and Ninja. Python and Flutter were subsequently installed under `%LOCALAPPDATA%\HoenBuildTools` and are available when their directories are added to the current shell PATH; WindowsApps Python aliases are not interpreters. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
 
 ## Reproduce the x64 Windows Flutter build
 
@@ -45,3 +45,20 @@ For an isolated setup, pick a writable user-owned tools directory and avoid chan
 ### Bridge CI trigger investigation
 
 `bridge.yml` declares `workflow_call` only; it is not directly dispatchable. It builds on GitHub-hosted Ubuntu, generates the bridge using its pinned tool versions, and uploads artifacts; the workflow itself contains no signing, deployment or secret use. The existing manually dispatchable `flutter-ci.yml` calls the full Flutter build with `upload-artifact: false`, which in turn calls the bridge workflow. Its publishing and signing steps are gated by that false input, but it starts a much larger build matrix. A small manually dispatched wrapper that calls only `bridge.yml` with read-only repository permissions would avoid the unrelated jobs; it would need to be committed to a branch and reviewed before use. No workflow was edited or triggered. Confirm the CI run checkout SHA and bridge artifact digest before restoring generated files. Workflow behavior depends on repository Actions settings and permissions, which have not been verified here.
+
+### Confirmed local SDKs
+
+Official Python 3.12.10 x64 **embeddable** ZIP was extracted to `%LOCALAPPDATA%\HoenBuildTools\python-3.12.10`. Its MD5 matched the [python.org release listing](https://www.python.org/downloads/release/python-31210/) (`fe8ef205f2e9c3ba44d0cf9954e1abd3`); computed SHA-256 is `4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3`. `python.exe --version` and `build.py --print-features` succeeded. This isolated distribution has no `pip`; packaging steps that require pip need a separately provisioned full per-user Python or another verified approach.
+
+Official Flutter 3.24.5 x64 archive was extracted to `%LOCALAPPDATA%\HoenBuildTools\flutter-3.24.5\flutter`. Its SHA-256 `b8a7485acd3c6fb23a76b7ac09f89e8d93d62fbff7147c6f5f8c5686d949eeac` matched the [official Windows release manifest](https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json); framework revision `dec2ee5c1f98f8e84a7d5380c05eb8a3d0a81668` and `flutter --version` were verified. This is stock Flutter; CI's custom engine and patch are still unapplied.
+
+To use these installations in the current PowerShell process only:
+
+```powershell
+$tools = Join-Path $env:LOCALAPPDATA 'HoenBuildTools'
+$env:PATH = (Join-Path $tools 'python-3.12.10') + ';' + (Join-Path $tools 'flutter-3.24.5\flutter\bin') + ';' + $env:PATH
+$env:RUSTUP_TOOLCHAIN = '1.75.0-x86_64-pc-windows-msvc'
+.\scripts\hoen-build-preflight.ps1
+```
+
+With those process-local variables, the preflight recognizes Python and Flutter. LLVM/Clang, pinned vcpkg and its packages, the generated bridge artifact, and custom Flutter engine/patch remain unresolved. No build, host service, or firewall action was performed.

@@ -1,10 +1,12 @@
 //! Durable metadata-only outbox for the Hoen mailbox session-history API.
 //!
-//! No networking, identity verification, credential storage, or RustDesk hooks
+//! No identity verification, credential storage, or RustDesk hooks
 //! are provided. A caller must obtain the client identity from an authenticated
 //! enrollment, provision a private directory and send each session serially. The
 //! mailbox backend supports configurable enrolled principals; the caller must
 //! resolve a verified principal before creating a history event.
+
+pub mod delivery;
 
 use std::{fmt, path::Path, time::Duration};
 

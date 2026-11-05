@@ -1,0 +1,23 @@
+name: Hoen bridge artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/mailbox-integration]
+    paths:
+      - .github/workflows/hoen-bridge.yml
+      - .github/workflows/bridge.yml
+      - src/flutter_ffi.rs
+      - flutter/pubspec.yaml
+      - libs/hbb_common
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hoen-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    uses: ./.github/workflows/bridge.yml

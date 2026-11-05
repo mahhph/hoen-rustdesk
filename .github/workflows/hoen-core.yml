@@ -1,0 +1,31 @@
+name: Hoen portable integration tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/mailbox-integration]
+    paths:
+      - .github/workflows/hoen-core.yml
+      - libs/hoen-mailbox-auth/**
+      - libs/hoen-mailbox-history/**
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: '1.75.0'
+      - name: Verify channel binding and viewer proof
+        run: cargo test --locked --manifest-path libs/hoen-mailbox-auth/Cargo.toml
+      - name: Verify durable history and HTTPS delivery
+        run: cargo test --locked --manifest-path libs/hoen-mailbox-history/Cargo.toml

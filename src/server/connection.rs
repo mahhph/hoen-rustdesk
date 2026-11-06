@@ -1947,7 +1947,7 @@ impl Connection {
             return true;
         }
         #[cfg(feature = "hoen-mailbox")]
-        if crate::hoen::authorization::reject_legacy_proof(&self.lr).is_err() {
+        if self.hoen.is_none() && crate::hoen::authorization::reject_legacy_proof(&self.lr).is_err() {
             self.send_login_error("Connection not allowed").await;
             return false;
         }
@@ -3106,7 +3106,7 @@ impl Connection {
         }
         #[cfg(feature = "hoen-mailbox")]
         if let Some(message::Union::LoginRequest(lr)) = msg.union.as_ref() {
-            if crate::hoen::authorization::reject_legacy_proof(lr).is_err() {
+            if self.hoen.is_none() && crate::hoen::authorization::reject_legacy_proof(lr).is_err() {
                 self.send_login_error("Connection not allowed").await;
                 return false;
             }

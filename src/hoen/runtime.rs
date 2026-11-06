@@ -374,6 +374,15 @@ fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
     bail!("protected mailbox enrollment is not implemented on this platform");
 }
 
+fn resolve_local_address(mailbox_url: &url::Url) -> ResultType<IpAddr> {
+    mailbox_url
+        .socket_addrs(|| None)?
+        .into_iter()
+        .filter_map(|remote| network::local_address_for(remote).ok())
+        .find(|address| Endpoint::new(*address, 1).is_ok())
+        .ok_or_else(|| anyhow!("no local address available for mailbox"))
+}
+
 async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>> {
     let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
     let leaf_pin = enrollment.mailbox_leaf_fingerprint.as_deref()
@@ -381,15 +390,19 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     if hosting && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
     }
-    let policy = network::Policy {
-        local_address: enrollment.local_address,
-    };
     let monitor = Arc::new(
         NetworkMonitor::start()
             .await
             .map_err(|_| anyhow!("network monitoring unavailable"))?,
     );
     let captured = monitor.state();
+    let mailbox_url = url::Url::parse(&enrollment.mailbox_url)?;
+    let local_address = hbb_common::tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        spawn_blocking(move || resolve_local_address(&mailbox_url)),
+    )
+    .await???;
+    let policy = network::Policy { local_address };
     let check_policy = policy.clone();
     let address = SocketAddr::new(policy.local_address, enrollment.listen_port);
     spawn_blocking(move || network::verify_binding(Some(&check_policy), address))
@@ -486,6 +499,15 @@ pub(crate) async fn machine_for_service() -> ResultType<Arc<Runtime>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_resolves_current_address_instead_of_using_enrollment_address() {
+        let enrollment = parse(&serde_json::to_vec(&fixture()).unwrap()).unwrap();
+        let mailbox = url::Url::parse("https://127.0.0.1:42819/").unwrap();
+        let address = resolve_local_address(&mailbox).unwrap();
+        assert_eq!(address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_ne!(address, enrollment.local_address);
+    }
     fn fixture() -> serde_json::Value {
         serde_json::json!({
             "schema_version": 1, "identity": "test-viewer", "display_name": "Test viewer",

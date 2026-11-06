@@ -1,5 +1,7 @@
 # Hoen Windows host: build and integration notes
 
+For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).
+
 Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset and Clang and protoc were not found on PATH. Visual Studio provides CMake and Ninja. Python and Flutter were subsequently installed under `%LOCALAPPDATA%\HoenBuildTools` and are available when their directories are added to the current shell PATH; WindowsApps Python aliases are not interpreters. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
 
 ## Reproduce the x64 Windows Flutter build

@@ -1,5 +1,5 @@
-//! Keychain storage for an interactive macOS user. This component is not yet wired into the
-//! host runtime: admission, protected history and enrollment lifecycle must be completed first.
+//! Keychain storage for an interactive macOS user. Network admission and the signed application
+//! enrollment lifecycle still need validation before mailbox hosting can be enabled.
 use super::{CredentialStore, Purpose, Secret, StoreError};
 use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
 
@@ -8,14 +8,14 @@ const ITEM_NOT_FOUND: i32 = -25300;
 
 /// Separate entries for host and viewer. Keychain ACLs identify the executable, not its role:
 /// these names alone do not isolate two processes running as the same user and executable.
-pub(super) struct MacStore {
+pub(crate) struct MacStore {
     keychain: SecKeychain,
     purpose: Purpose,
 }
 
 impl MacStore {
     /// Use the interactive user's default keychain, never the system daemon's keychain.
-    pub(super) fn for_user(purpose: Purpose) -> Result<Self, StoreError> {
+    pub(crate) fn for_user(purpose: Purpose) -> Result<Self, StoreError> {
         extern "C" {
             fn geteuid() -> u32;
         }

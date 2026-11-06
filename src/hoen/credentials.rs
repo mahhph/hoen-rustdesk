@@ -52,6 +52,8 @@ pub trait CredentialStore {
 #[cfg(target_os = "macos")]
 #[path = "macos_credentials.rs"]
 mod macos_store;
+#[cfg(target_os = "macos")]
+pub(crate) use macos_store::MacStore;
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "credential store: {:?}", self)

@@ -4,7 +4,7 @@ use hbb_common::{
     ResultType,
 };
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub(crate) fn command() -> Option<ResultType<()>> {
     use super::credentials::{Purpose, Secret, MAX_SECRET_BYTES};
     use std::io::Read;
@@ -28,7 +28,7 @@ pub(crate) fn command() -> Option<ResultType<()>> {
     })())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub(crate) fn command() -> Option<ResultType<()>> {
     None
 }

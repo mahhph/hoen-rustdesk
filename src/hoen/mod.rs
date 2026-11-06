@@ -6,6 +6,8 @@ pub(crate) mod handshake;
 pub(crate) mod history_worker;
 pub(crate) mod host;
 pub(crate) mod mailbox_worker;
+#[cfg(target_os = "macos")]
+mod macos_private_dir;
 pub(crate) mod network;
 pub(crate) mod network_monitor;
 pub(crate) mod runtime;

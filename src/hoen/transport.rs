@@ -87,7 +87,7 @@ pub(crate) fn validate_decrypted_frame(bytes: &[u8]) -> ResultType<()> {
 async fn admit(policy: network::Policy, local: SocketAddr, peer: SocketAddr) -> ResultType<()> {
     spawn_blocking(move || network::admit_socket(Some(&policy), local, peer))
         .await?
-        .map_err(|_| anyhow!("connection is outside the approved home network"))
+        .map_err(|_| anyhow!("socket local address does not match configured bind address"))
 }
 
 impl Transport {
@@ -169,7 +169,7 @@ impl Transport {
 
     /// Windows viewer path: the SYSTEM-owned service supplies the selected
     /// host's registered pin and signs a grant for the verified channel. The
-    /// viewer still enforces its own live network policy and host handshake.
+    /// viewer verifies the host handshake.
     #[cfg(windows)]
     pub async fn connect_via_service(host: Identity) -> ResultType<(Self, HoenProof)> {
         use super::local_proof::{LookupRequest, ProofRequest};
@@ -188,8 +188,6 @@ impl Transport {
         // endpoint; never accept arbitrary peer-supplied routing information.
         Endpoint::new(lookup.endpoint.ip(), lookup.endpoint.port())?;
         let policy = network::Policy {
-            adapter_id: lookup.adapter_id,
-            network_id: lookup.network_id,
             local_address: lookup.local_address,
         };
         let monitor = Arc::new(
@@ -250,7 +248,7 @@ impl Transport {
         Ok((transport, proof))
     }
 
-    /// The caller must also validate the approved address before opening its listener.
+    /// The caller must validate the selected local address before opening its listener.
     pub async fn accept(
         socket: TcpStream,
         policy: network::Policy,

@@ -32,7 +32,7 @@ pub(crate) struct Runtime {
 }
 
 impl Runtime {
-    /// Called by the host only after the approved listener has successfully bound.
+    /// Called by the host only after the configured listener has successfully bound.
     pub async fn register_host(&self) -> ResultType<()> {
         if self.history.is_none() {
             bail!("viewer runtime cannot enable hosting");
@@ -56,8 +56,10 @@ struct Enrollment {
     mailbox_leaf_fingerprint: Option<String>,
     access_token: String,
     signing_seed: [u8; 32],
-    adapter_id: String,
-    network_id: String,
+    #[serde(default, rename = "adapter_id")]
+    _legacy_adapter_id: Option<String>,
+    #[serde(default, rename = "network_id")]
+    _legacy_network_id: Option<String>,
     local_address: IpAddr,
     listen_port: u16,
     hosting_enabled: bool,
@@ -107,8 +109,10 @@ struct BootstrapConfig {
     identity: String,
     display_name: String,
     mailbox_ca_pem: String,
-    adapter_id: String,
-    network_id: String,
+    #[serde(default, rename = "adapter_id")]
+    legacy_adapter_id: Option<String>,
+    #[serde(default, rename = "network_id")]
+    legacy_network_id: Option<String>,
     local_address: IpAddr,
     listen_port: u16,
 }
@@ -148,8 +152,8 @@ fn transform_bootstrap(secret: &[u8], seed: [u8; 32]) -> ResultType<Enrollment> 
         mailbox_leaf_fingerprint: Some(pin),
         access_token: value.client.token.clone(),
         signing_seed: seed,
-        adapter_id: value.config.adapter_id,
-        network_id: value.config.network_id,
+        _legacy_adapter_id: value.config.legacy_adapter_id,
+        _legacy_network_id: value.config.legacy_network_id,
         local_address: value.config.local_address,
         listen_port: value.config.listen_port,
         hosting_enabled: true,
@@ -157,17 +161,6 @@ fn transform_bootstrap(secret: &[u8], seed: [u8; 32]) -> ResultType<Enrollment> 
     let encoded = super::credentials::Secret::new(serde_json::to_vec(&enrollment)?)
         .map_err(|_| anyhow!("invalid protected machine bootstrap"))?;
     parse(encoded.expose())
-}
-
-fn opaque_id(value: &str) -> ResultType<u128> {
-    if value.len() != 32 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
-        bail!("invalid approved network identifier");
-    }
-    let value = u128::from_str_radix(value, 16)?;
-    if value == 0 {
-        bail!("missing approved network identifier");
-    }
-    Ok(value)
 }
 
 fn parse(secret: &[u8]) -> ResultType<Enrollment> {
@@ -187,8 +180,6 @@ fn parse(secret: &[u8]) -> ResultType<Enrollment> {
     AccessToken::from_encoded(&value.access_token)?;
     if let Some(pin) = &value.mailbox_leaf_fingerprint { Fingerprint::parse(pin)?; }
     Endpoint::new(value.local_address, value.listen_port)?;
-    opaque_id(&value.adapter_id)?;
-    opaque_id(&value.network_id)?;
     let url =
         url::Url::parse(&value.mailbox_url).map_err(|_| anyhow!("invalid mailbox endpoint"))?;
     if url.scheme() != "https"
@@ -358,9 +349,7 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     if hosting && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
     }
-    let mut policy = network::Policy {
-        adapter_id: opaque_id(&enrollment.adapter_id)?,
-        network_id: opaque_id(&enrollment.network_id)?,
+    let policy = network::Policy {
         local_address: enrollment.local_address,
     };
     let monitor = Arc::new(
@@ -369,19 +358,11 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
             .map_err(|_| anyhow!("network monitoring unavailable"))?,
     );
     let captured = monitor.state();
-    let requested_policy = policy.clone();
-    let current = spawn_blocking(move || network::resolve_current_ipv4(Some(&requested_policy)))
-        .await?
-        .map_err(|_| anyhow!("the approved home network has no unambiguous current IPv4 address"))?;
-    if !monitor.is_current(captured) {
-        bail!("network changed during enrollment validation");
-    }
-    policy.local_address = current;
     let check_policy = policy.clone();
-    let address = SocketAddr::new(current, enrollment.listen_port);
+    let address = SocketAddr::new(policy.local_address, enrollment.listen_port);
     spawn_blocking(move || network::verify_binding(Some(&check_policy), address))
         .await?
-        .map_err(|_| anyhow!("the approved home network is not available"))?;
+        .map_err(|_| anyhow!("the configured bind address is not available"))?;
     if !monitor.is_current(captured) {
         bail!("network changed during enrollment validation");
     }
@@ -478,7 +459,6 @@ mod tests {
             "schema_version": 1, "identity": "test-viewer", "display_name": "Test viewer",
             "mailbox_url": "https://192.168.1.2:42819/", "mailbox_ca_pem": "synthetic certificate",
             "access_token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "signing_seed": vec![7u8; 32],
-            "adapter_id": "00000000000000000000000000000001", "network_id": "00000000000000000000000000000002",
             "local_address": "192.168.1.3", "listen_port": 42830, "hosting_enabled": false
         })
     }
@@ -489,7 +469,7 @@ mod tests {
         let input = serde_json::json!({
             "schema_version": 1,
             "client": {"url":"https://192.168.1.2:42819/", "fingerprint":pin.clone(), "environment":"production", "token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
-            "config": {"identity":"test-host", "display_name":"Test host", "mailbox_ca_pem":certificate, "adapter_id":"00000000000000000000000000000001", "network_id":"00000000000000000000000000000002", "local_address":"192.168.1.3", "listen_port":42830}
+            "config": {"identity":"test-host", "display_name":"Test host", "mailbox_ca_pem":certificate, "local_address":"192.168.1.3", "listen_port":42830}
         });
         let encoded = serde_json::to_vec(&input).unwrap();
         let enrollment = transform_bootstrap(&encoded, [9;32]).unwrap();
@@ -499,6 +479,10 @@ mod tests {
         assert!(enrollment.hosting_enabled);
         let roundtrip = parse(&serde_json::to_vec(&enrollment).unwrap()).unwrap();
         assert!(roundtrip == enrollment);
+        let mut old = input.clone();
+        old["config"]["adapter_id"] = serde_json::json!("legacy");
+        old["config"]["network_id"] = serde_json::json!("legacy");
+        assert!(transform_bootstrap(&serde_json::to_vec(&old).unwrap(), [9;32]).is_ok());
         let mut wrong_pin = input.clone();
         wrong_pin["client"]["fingerprint"] = serde_json::json!("cd".repeat(32));
         assert!(transform_bootstrap(&serde_json::to_vec(&wrong_pin).unwrap(), [9;32]).is_err());
@@ -517,16 +501,17 @@ mod tests {
             ("schema_version", serde_json::json!(2)),
             ("access_token", serde_json::json!("invalid")),
             ("mailbox_url", serde_json::json!("http://192.168.1.2/")),
-            (
-                "adapter_id",
-                serde_json::json!("00000000000000000000000000000000"),
-            ),
+            ("local_address", serde_json::json!("0.0.0.0")),
             ("listen_port", serde_json::json!(0)),
         ] {
             let mut bad = valid.clone();
             bad[key] = replacement;
             assert!(parse(&serde_json::to_vec(&bad).unwrap()).is_err());
         }
+        let mut legacy = valid.clone();
+        legacy["adapter_id"] = serde_json::json!("previous-network-id");
+        legacy["network_id"] = serde_json::json!("previous-network-id");
+        assert!(parse(&serde_json::to_vec(&legacy).unwrap()).is_ok());
         let mut unknown = valid;
         unknown["disable_authentication"] = serde_json::json!(true);
         assert!(parse(&serde_json::to_vec(&unknown).unwrap()).is_err());

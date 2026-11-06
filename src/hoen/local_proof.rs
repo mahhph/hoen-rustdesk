@@ -14,35 +14,14 @@ pub struct LookupRequest {
     pub host: String,
 }
 
-/// Public registry and approved-network values only; no mailbox credentials.
+/// Public registry and socket values only; no mailbox credentials.
 #[derive(Clone, Debug, serde_derive::Serialize, serde_derive::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LookupResponse {
     pub endpoint: SocketAddr,
     pub host_fingerprint: [u8; 32],
-    #[serde(with = "guid_hex")]
-    pub adapter_id: u128,
-    #[serde(with = "guid_hex")]
-    pub network_id: u128,
     pub local_address: IpAddr,
     pub viewer_key: [u8; 32],
-}
-
-// JSON enum buffering can otherwise lose precision for integers above u64.
-mod guid_hex {
-    use serde::{de::Error, Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(value: &u128, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{value:032x}"))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u128, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        if value.len() != 32 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(D::Error::custom("invalid adapter or network id"));
-        }
-        u128::from_str_radix(&value, 16).map_err(D::Error::custom)
-    }
 }
 
 pub(crate) async fn lookup(
@@ -57,8 +36,6 @@ pub(crate) async fn lookup(
     Ok(LookupResponse {
         endpoint: SocketAddr::new(machine.endpoint.address(), machine.endpoint.port()),
         host_fingerprint: *machine.public_key_fingerprint.as_bytes(),
-        adapter_id: runtime.policy.adapter_id,
-        network_id: runtime.policy.network_id,
         local_address: runtime.policy.local_address,
         viewer_key: runtime.signing_key.public_key().0,
     })
@@ -149,26 +126,22 @@ mod tests {
     }
 
     #[test]
-    fn lookup_response_preserves_full_width_network_ids() {
+    fn lookup_response_roundtrips_in_ipc() {
         let response = LookupResponse {
             endpoint: "192.168.1.2:1234".parse().unwrap(),
             host_fingerprint: [1; 32],
-            adapter_id: u128::MAX,
-            network_id: u128::MAX - 1,
             local_address: "192.168.1.3".parse().unwrap(),
             viewer_key: [2; 32],
         };
         let bytes = serde_json::to_vec(&response).unwrap();
         let decoded: LookupResponse = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(decoded.adapter_id, response.adapter_id);
-        assert_eq!(decoded.network_id, response.network_id);
+        assert_eq!(decoded.local_address, response.local_address);
         let envelope = crate::ipc::Data::HoenLookupResponse(Some(response));
         let bytes = serde_json::to_vec(&envelope).unwrap();
         let decoded: crate::ipc::Data = serde_json::from_slice(&bytes).unwrap();
         match decoded {
             crate::ipc::Data::HoenLookupResponse(Some(value)) => {
-                assert_eq!(value.adapter_id, u128::MAX);
-                assert_eq!(value.network_id, u128::MAX - 1);
+                assert_eq!(value.local_address, "192.168.1.3".parse::<IpAddr>().unwrap());
             }
             _ => panic!("unexpected IPC response"),
         }

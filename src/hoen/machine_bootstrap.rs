@@ -267,8 +267,10 @@ mod windows_bootstrap {
         identity: serde::de::IgnoredAny,
         display_name: serde::de::IgnoredAny,
         mailbox_ca_pem: serde::de::IgnoredAny,
-        adapter_id: serde::de::IgnoredAny,
-        network_id: serde::de::IgnoredAny,
+        #[serde(default)]
+        adapter_id: Option<serde::de::IgnoredAny>,
+        #[serde(default)]
+        network_id: Option<serde::de::IgnoredAny>,
         local_address: serde::de::IgnoredAny,
         listen_port: serde::de::IgnoredAny,
     }

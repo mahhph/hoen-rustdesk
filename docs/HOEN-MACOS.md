@@ -28,6 +28,8 @@ app. If host startup fails, the controller logs the failure and stops rather
 than repeatedly requesting Keychain access. A restart is currently required
 after correcting that failure. This behavior does not establish login-time
 startup or automatic recovery from network changes.
+The Mac host acquires the app's local control socket before starting hosting;
+if another instance owns it, the new host stops without closing that instance.
 
 To inspect the app's macOS permissions without requesting either permission,
 run its signed executable with `--hoen-host-permissions` from the intended

@@ -14,6 +14,10 @@ The user confirmed that the network path is not an authorization rule. Connectio
 
 ## Installer lifecycle
 
+Production hardening is tracked in [production stories](PRODUCTION-STORIES.md). The first PRD-01 increment adds `scripts/remote-desktop-firewall.ps1`, separately invoked with `-Action Validate|Configure|Remove -ListenerPort <approved-port>`. Validate is the default and does not mutate policy. Configure and Remove require elevation. The helper owns only `RemoteDesktopService.Inbound.v1`, verifies its marker and executable/port/filter scope, and refuses conflicting rules or policy-query failures. It permits the configured TCP port for the installed executable across profiles and addresses; mailbox cryptographic authentication remains the access policy. An enabled rule is not proof of remote reachability.
+
+This helper is not yet wired into installer actions: the installed manifest does not retain the approved port, and the service's protected enrollment must not be decrypted by the installer just to discover it. Protected installation metadata, transactional upgrade/recovery, and a fresh-machine trial remain outstanding. Existing manually configured rules, including `HoenRemoteDesktopServiceTCP42830`, are not adopted or removed by this helper. Running it is not necessary on already working machines during this development checkpoint.
+
 `scripts/remote-desktop-service-installer.ps1` supports these explicit actions:
 
 - `Plan` is read-only and produces the payload hash manifest. With `ExpectedManifest`, it checks the exact payload against a previously reviewed manifest.

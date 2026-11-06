@@ -118,7 +118,7 @@ impl Transport {
     }
 
     pub async fn connect(
-        policy: network::Policy,
+        _policy: network::Policy,
         mailbox: &MailboxWorker,
         host: Identity,
         signing_key: &sign::SecretKey,
@@ -133,20 +133,20 @@ impl Transport {
             bail!("mailbox host is unavailable");
         }
         let remote = SocketAddr::new(machine.endpoint.address(), machine.endpoint.port());
-        let bind = SocketAddr::new(policy.local_address, 0);
-        admit(policy.clone(), bind, remote).await?;
         if !monitor.is_current(captured) {
             bail!("network changed before mailbox connection");
         }
-        let socket = if bind.is_ipv4() {
+        let socket = if remote.is_ipv4() {
             TcpSocket::new_v4()?
         } else {
             TcpSocket::new_v6()?
         };
-        socket.bind(bind)?;
         let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await??;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
+        let policy = network::Policy {
+            local_address: local.ip(),
+        };
         admit(policy.clone(), local, peer).await?;
         let mut stream = Stream::from(socket, local);
         let channel =
@@ -187,9 +187,6 @@ impl Transport {
         // Only the service's response to this validated request selects the
         // endpoint; never accept arbitrary peer-supplied routing information.
         Endpoint::new(lookup.endpoint.ip(), lookup.endpoint.port())?;
-        let policy = network::Policy {
-            local_address: lookup.local_address,
-        };
         let monitor = Arc::new(
             NetworkMonitor::start()
                 .await
@@ -200,20 +197,20 @@ impl Transport {
             bail!("network monitoring unavailable");
         }
         let remote = lookup.endpoint;
-        let bind = SocketAddr::new(policy.local_address, 0);
-        admit(policy.clone(), bind, remote).await?;
         if !monitor.is_current(captured) {
             bail!("network changed before mailbox connection");
         }
-        let socket = if bind.is_ipv4() {
+        let socket = if remote.is_ipv4() {
             TcpSocket::new_v4()?
         } else {
             TcpSocket::new_v6()?
         };
-        socket.bind(bind)?;
         let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await??;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
+        let policy = network::Policy {
+            local_address: local.ip(),
+        };
         if peer != remote {
             bail!("mailbox peer address changed");
         }
@@ -373,6 +370,17 @@ mod service_tests {
 mod tests {
     use super::*;
     use hbb_common::tokio::net::TcpListener;
+
+    #[hbb_common::tokio::test]
+    async fn outgoing_socket_uses_current_route_without_saved_bind_address() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let remote = listener.local_addr().unwrap();
+        let socket = TcpSocket::new_v4().unwrap();
+        let (client, accepted) = hbb_common::tokio::join!(socket.connect(remote), listener.accept());
+        let client = client.unwrap();
+        assert_eq!(client.local_addr().unwrap().ip(), remote.ip());
+        assert!(accepted.is_ok());
+    }
 
     #[hbb_common::tokio::test]
     async fn mismatched_binding_closes_before_host_greeting() {

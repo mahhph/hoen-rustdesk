@@ -1,5 +1,18 @@
 //! Socket binding checks. Peer authorization comes from the encrypted mailbox proof.
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
+
+/// Ask the OS which local address it would use to reach the mailbox.
+/// Connecting a UDP socket selects a route without sending a datagram.
+pub fn local_address_for(remote: SocketAddr) -> std::io::Result<IpAddr> {
+    let bind = if remote.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    };
+    let socket = UdpSocket::bind(bind)?;
+    socket.connect(remote)?;
+    Ok(socket.local_addr()?.ip())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Policy {
@@ -42,6 +55,12 @@ pub fn admit_socket(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operating_system_selects_local_address_for_destination() {
+        let remote: SocketAddr = "127.0.0.1:42819".parse().unwrap();
+        assert_eq!(local_address_for(remote).unwrap(), remote.ip());
+    }
 
     #[test]
     fn binding_rejects_missing_invalid_or_different_local_address() {

@@ -19,10 +19,14 @@ class BuildSafetyTest(unittest.TestCase):
         project = flutter / 'macos/Runner.xcodeproj/project.pbxproj'
         config.parent.mkdir(parents=True)
         project.parent.mkdir(parents=True)
+        icon = flutter / 'macos/Runner/AppIcon.icns'
+        dev_icon = flutter / 'macos/Runner/HoenRemoteDev.icns'
+        icon.write_bytes(b'stock-icon')
+        dev_icon.write_bytes(b'development-icon')
         config.write_text('PRODUCT_NAME = RustDesk\n')
         project.write_text('PRODUCT_BUNDLE_IDENTIFIER = com.carriez.rustdesk;\nuser-change\n')
-        self.config, self.project = config, project
-        self.original = {p: p.read_bytes() for p in (config, project)}
+        self.config, self.project, self.icon = config, project, icon
+        self.original = {p: p.read_bytes() for p in (config, project, icon)}
         self.patches = [
             mock.patch.object(build, 'ROOT', root),
             mock.patch.object(build, 'FLUTTER', flutter),
@@ -40,10 +44,12 @@ class BuildSafetyTest(unittest.TestCase):
             if args[0] == 'flutter':
                 self.assertIn('HoenRemoteDev', self.config.read_text())
                 self.assertIn(build.BUNDLE_ID, self.project.read_text())
+                self.assertEqual(self.icon.read_bytes(), b'development-icon')
         with mock.patch.object(build, 'run', side_effect=fake_run):
             build.build()
         self.assertEqual(self.config.read_bytes(), self.original[self.config])
         self.assertEqual(self.project.read_bytes(), self.original[self.project])
+        self.assertEqual(self.icon.read_bytes(), self.original[self.icon])
 
     def test_never_overwrites_a_concurrent_project_edit(self):
         def fake_run(args, **kwargs):

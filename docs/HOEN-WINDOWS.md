@@ -6,7 +6,7 @@ SSID, interface type, OS category and peer route are not authorization checks.
 Mac retains Keychain enrollment and the development app namespace, but no longer
 queries Wi-Fi identifiers or automatically selects a pinned-network address.
 Network notifications may terminate a session; reconnection requires fresh proof.
-The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+At host startup the address is selected using the operating system's route to the mailbox; outgoing sockets use the route to their target. The registry advertises one address, so multiple active paths need further discovery or relay support. Relay is unimplemented.
 Earlier seq191/193 admission descriptions are historical and superseded.
 
 For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).
@@ -162,3 +162,21 @@ Checkpoint `40870ebf6` completed the shipping Windows build with exit 0 in **522
 Executable SHA-256: `690178cea5cae19b471e5c269a907bad3c3c50bfb0db3ad15bab24b2fce86029`; DLL SHA-256: `2cd9611edab1dffd8ccd556d6add15a424726e79695c59137dd6466c214c44dc`. This artifact includes bounded worker supervision, owned-worker shutdown, and connect-only mailbox GUI startup. Its tested source checkpoint is described in [installation and supervision](HOEN-INSTALLER.md). Installed LocalSystem lifecycle and actual desktop sessions remain unverified.
 
 A read-only authenticated production registry query returned HTTP 200 with an empty machine list. No existing production desktop key was found to migrate at that observation; startup must still enforce fingerprint consistency against the then-current registry. Mac received certificate-preparation follow-up message 208; no certificate rotation, provisioning, installation or firewall change was performed.
+
+### Merged address-selection artifact (2026-11-06)
+
+Merged checkpoint `d705b800c` passed 42 mailbox tests, five Windows pipe tests, and the GUI startup subprocess check on Lenovo. The shipping build succeeded with exit 0 in **690.09 seconds (11 minutes 30 seconds)**: Cargo reported 9 minutes 11 seconds and Flutter 119.3 seconds. Log: `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-d705b800c-build.log`; measured result: `remote-desktop-d705b800c-build-result.json`. The payload passed generation and exact rechecking of its install manifest. The actual runner rejected synthetic invalid viewer enrollment with exit 1.
+
+Executable SHA-256: `8c71af011a933eee3a9c34f9d88fbfe5cb72565bfae7cc2d2910b821642367a7`; DLL SHA-256: `86b656fddffc37b359a35cc37a2cc0012054a6f27a7a4a3c3c5e8ae2781504e7`. Area51 was informed of this package and validation evidence in message 280. No Windows service was installed or enrolled. Certificate activation, consumer switching, installed lifecycle and real Area51-host/Lenovo-viewer desktop operation remain outstanding.
+
+### Mailbox machine selector (2026-11-06)
+
+Mailbox builds now show a registered-machine selector instead of the upstream ID/password and installation screen. The selector displays each machine's registered display name (alias), while Connect uses its authenticated mailbox identity internally. It excludes this machine and registrations with hosting disabled. Refresh clears the previous selection; unavailable or malformed directory responses disable Connect. A successful directory response confirms the service broker and mailbox directory responded, not that another host is online or its desktop is ready.
+
+The Windows client obtains only public machine summaries through the existing authenticated service pipe, with the existing request limits and concurrency cap. Directory responses have a separate bounded 256 KiB receive limit. The Flutter bridge reuses reserved option queries, so generated bridge bindings do not change. The service may perform its existing first-start registration when its machine runtime is initialized. Mac uses the same UI contract but reports unavailable until its directory broker is implemented; no credential is copied into the viewer.
+
+The stock Install action is disabled in mailbox builds. Existing non-mailbox home screens, installation behavior and connection paths remain unchanged. Changed existing paths are the home-screen feature switch, the reserved bridge queries and installation capability flag, plus the authenticated Windows service's directory request dispatch. The existing connection callback still supplies the selected identity to the verified mailbox transport.
+
+The fork's Windows launcher also has a distinct monitor-and-arrows icon, including seven embedded sizes from 16 to 256 pixels. `scripts/generate-remote-desktop-icon.ps1` regenerates the resource with Windows System.Drawing. This visual branding applies to the Windows launcher in both feature modes; it does not alter installation or connection behavior.
+
+Validation passed 43 mailbox integration tests, five Windows pipe tests, feature-on and feature-off GUI startup tests, and two Flutter widget tests covering eligible hosts, alias selection, correct connection identity, and stale selection removal on refresh failure. Analysis of the new Flutter widget/tests was clean; the existing home page retains three pre-existing deprecation notices.

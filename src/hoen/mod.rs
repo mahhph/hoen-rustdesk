@@ -10,6 +10,8 @@ pub(crate) mod host;
 pub(crate) mod local_proof;
 pub(crate) mod mailbox_worker;
 #[cfg(target_os = "macos")]
+pub(crate) mod macos_directory;
+#[cfg(target_os = "macos")]
 pub(crate) mod macos_namespace;
 #[cfg(target_os = "macos")]
 mod macos_private_dir;

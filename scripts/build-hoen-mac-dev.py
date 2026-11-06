@@ -34,17 +34,20 @@ def settings_files():
 def build():
     if sys.platform != 'darwin':
         raise RuntimeError('This development build requires macOS.')
-    originals = {path: path.read_bytes() for path in settings_files()}
+    icon = FLUTTER / 'macos/Runner/AppIcon.icns'
+    dev_icon = FLUTTER / 'macos/Runner/HoenRemoteDev.icns'
+    originals = {path: path.read_bytes() for path in (*settings_files(), icon)}
     modified = {}
     for path, (old, new) in settings_files().items():
         original = originals[path]
         if old.encode() not in original:
             raise RuntimeError(f'Expected Xcode setting not found in {path}; nothing changed.')
         modified[path] = original.replace(old.encode(), new.encode())
+    modified[icon] = dev_icon.read_bytes()
     BACKUPS.mkdir(parents=True, exist_ok=True)
     backup_dir = BACKUPS / uuid.uuid4().hex
     backup_dir.mkdir(mode=0o700)
-    for index, path in enumerate(settings_files()):
+    for index, path in enumerate(originals):
         destination = backup_dir / f'{index}.original'
         destination.write_bytes(originals[path])
         destination.chmod(0o600)

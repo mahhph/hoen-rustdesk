@@ -1,5 +1,14 @@
 # macOS host and viewer integration
 
+Current seq210 integration supersedes earlier network policy and readiness notes below.
+The native TCP transport checks its configured local binding; adapter/network IDs,
+SSID, interface type, OS category and peer route are not authorization checks.
+Mac retains Keychain enrollment and the development app namespace, but no longer
+queries Wi-Fi identifiers or automatically selects a pinned-network address.
+Network notifications may terminate a session; reconnection requires fresh proof.
+The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+Earlier seq191/193 admission descriptions are historical and superseded.
+
 Status: source and build review only. This branch is not an integrated host,
 and no service, privacy setting, listener, or firewall setting has been installed.
 The earlier custom Hoen Remote prototype is preserved in the mailbox repository;
@@ -35,10 +44,10 @@ At commit `92dfd7e4aabe746f4c3acfbf4dd005d8aaedcdc6`, the upstream direct
 IP/domain branches in `src/client.rs` return a TCP connection before the shared
 secure handshake. `src/rendezvous_mediator.rs` uses `listen_any` for its direct
 server. These paths are shared across desktop platforms, including macOS; neither
-a direct address nor a listener proves approved-home-network admission or a
+a direct address nor a listener proves direct-LAN admission or a
 verified mailbox identity. Do not expose the direct server as a Hoen host until
 the planned authenticated handshake, grant validation, transport provenance,
-and approved-interface enforcement are implemented and tested. Follow
+and actual socket/interface and on-link route enforcement are implemented and tested. Follow
 `HOEN-AUTH.md`; do not use legacy fallback in Hoen mode.
 
 ## Evidence and remaining gates
@@ -72,9 +81,9 @@ credentials remain local; mailbox identity is cryptographic, not a display name.
 
 `network::verify_binding` and `network::admit_socket` return
 `SnapshotUnavailable` on macOS. Both host and viewer must remain denied until
-an approved macOS interface/network policy, actual local/peer route checks and
+a macOS direct-LAN provider, actual local/peer route checks and
 network-change revalidation are implemented. Windows adapter/network GUIDs
-are not an implemented macOS approval identity. Coordinate any shared policy
+are not macOS approval identities and must not become policy pins. Coordinate any shared policy
 contract change before coding it.
 
 The seq159 TLS transition remains preparation only. Strict HTTPS clients need
@@ -102,6 +111,30 @@ Ruby Podfile syntax validation and `git diff --check` passed.
 Regression surface: only the Podfile deployment minimum changes existing
 macOS build behavior; shared runtime/protocol and feature-off code are untouched.
 
+## Direct-LAN clarification (mailbox seq191)
+
+Seq191, request `683e1f69-ab87-4691-95c4-24f3b3ba57dc`, supersedes
+the home-Wi-Fi, approved-SSID/adapter and Windows Private-profile assumptions,
+including seq189's request to change MeshMonkey's profile. Any same LAN over
+physical Wi-Fi or Ethernet is in scope. Do not pin an SSID, network GUID,
+named network or adapter, and do not change a network profile for authorization.
+Actual bound socket/interface and on-link route checks, cryptographic mailbox
+identity and single-use grant proof remain required. Hoen mode has no public
+rendezvous/relay, router exposure, password or manual-approval fallback.
+Windows firewall provisioning is a separate reviewed integration step.
+
+VPN is acceptable future scope under a separately reviewed transport policy;
+the direct-LAN helper may reject VPN until implemented. The Mac provider still
+returns `SnapshotUnavailable`, so no Mac admission behavior changes here.
+Seq193 published commits `b9ade1684` and `d750e367e` on
+`codex/area51-hoen-admission-guard`. Their five code/build file changes were
+reviewed and applied locally without conflicts, preserving the existing Mac
+documentation edits. Legacy host login rejects mailbox proofs; the direct-LAN
+helper removes network/profile pins and checks physical Wi-Fi or Ethernet.
+Area51's 17/17 feature-gated tests remain sender-reported, not locally reproduced.
+Host listener, viewer login, enrollment and two-machine acceptance remain
+incomplete; session readiness is not established.
+
 ## Mac verification of shared checkpoint 4095dc5
 
 On Apple Silicon macOS 27.2 with Xcode 27.2, merge `bf8406255930c8f88fd14b48502adeb1a566a71b`
@@ -118,3 +151,50 @@ At the same checkpoint the standalone mailbox authentication helper passed
 connection, implement the Mac protected credential store or network provider,
 or validate the native UI/host behavior. Existing per-machine build-only changes
 were preserved outside the commits; no host was installed.
+
+
+### macOS monitor startup investigation (mailbox seq217, 2026-11-06)
+
+On macOS 27.2 (26B123), arm64, uid 501, inside the local Codex
+workspace-write execution sandbox, the isolated harness compiling the actual
+`network_monitor.rs` and `macos_network_monitor.rs` ran five tests: four passed;
+`starts_and_shuts_down` failed with `MonitorError::Unavailable`.
+A direct native-call probe in the same execution context identified the first
+startup failure: `socket(17, 3, 0)` (`PF_ROUTE`, `SOCK_RAW`, `AF_UNSPEC`)
+returned -1 with errno 1 (`EPERM`, Operation not permitted). `Route::open`
+therefore exits before its `fcntl` calls and before any dynamic-store
+subscription or run-loop-source setup. A separate `SCDynamicStoreCreate`
+probe succeeded with `SCError() == 0`; notification subscription and source
+creation are not established by that probe.
+
+This establishes the failing syscall in the agent execution environment. It
+does not establish whether the restriction also applies to the intended signed
+application or an ordinary unsandboxed user shell. No normal-user-session
+startup result is available yet, so runtime readiness remains unverified.
+Do not infer that the connected network type caused the error or change
+network settings to address it. The monitor provides invalidation, not network
+authorization. Retain the fail-closed error rather than bypass routing events.
+
+Remaining verification: run the existing `starts_and_shuts_down` test in an
+ordinary user execution context, then the integrated native feature suite once
+the previously reported native dependency build blockers are resolved. If
+`EPERM` persists there, inspect that process's sandbox/entitlement policy before
+choosing a narrowly scoped implementation or packaging fix. This investigation
+changes documentation only; no runtime path, network settings, entitlements,
+service, or watcher configuration changed. Harness log:
+`/private/tmp/hoen-seq217-monitor.log`.
+
+### Integrated Mac test update (2026-11-06)
+
+With the installed ARM64 vcpkg dependencies and ordinary local socket access,
+the integrated source based on Area 51's merged PR #4 passed all 30 selected
+Mac development-feature Hoen tests in an optimized Rust 1.81 test build with
+release LTO disabled. This includes the actual macOS network monitor startup
+and shutdown, Keychain round trip, binding policy, and encrypted handshake
+tests. The authentication and history helper suites passed 8 and 10 tests,
+respectively, and the isolated build-script checks passed 4 tests.
+
+The monitor failure above was reproduced only in the restricted execution
+sandbox. The passing test demonstrates startup in the less-restricted command
+environment; it does not establish the behavior of a signed or sandboxed app.
+It also does not constitute an installed-host or two-machine session test.

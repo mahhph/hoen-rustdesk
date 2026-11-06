@@ -1,11 +1,36 @@
 use super::{handshake::VerifiedChannel, mailbox_worker::MailboxWorker};
-use base::message_proto::HoenProof;
+use base::message_proto::{HoenProof, LoginRequest};
 use hbb_common::{anyhow::bail, sodiumoxide::crypto::sign, ResultType};
 use hoen_mailbox_auth::{
     mailbox::{ConsumedGrant, GrantToken, Identity},
     verify_viewer_proof, viewer_proof_message,
 };
 use sha2::{Digest, Sha256};
+
+/// A proof has no authority on the legacy connection path. Only a connection
+/// carrying its own verified Hoen transport may consume one.
+pub(crate) fn reject_legacy_proof(login: &LoginRequest) -> ResultType<()> {
+    if login.hoen_proof.is_some() {
+        bail!("mailbox proof requires an authenticated mailbox transport");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_login_rejects_mailbox_proof_even_with_password() {
+        let mut login = LoginRequest::new();
+        login.password = vec![1, 2, 3].into();
+        login.hoen_proof = Some(HoenProof::new()).into();
+        assert!(reject_legacy_proof(&login).is_err());
+
+        login.hoen_proof = None.into();
+        assert!(reject_legacy_proof(&login).is_ok());
+    }
+}
 
 /// Called after the viewer verifies the host handshake and key confirmation.
 pub(crate) async fn issue_proof(

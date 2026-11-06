@@ -1,5 +1,14 @@
 # Hoen Windows host: build and integration notes
 
+Current seq210 integration supersedes earlier network policy and readiness notes below.
+The native TCP transport checks its configured local binding; adapter/network IDs,
+SSID, interface type, OS category and peer route are not authorization checks.
+Mac retains Keychain enrollment and the development app namespace, but no longer
+queries Wi-Fi identifiers or automatically selects a pinned-network address.
+Network notifications may terminate a session; reconnection requires fresh proof.
+The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+Earlier seq191/193 admission descriptions are historical and superseded.
+
 For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).
 
 Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset and Clang and protoc were not found on PATH. Visual Studio provides CMake and Ninja. Python and Flutter were subsequently installed under `%LOCALAPPDATA%\HoenBuildTools` and are available when their directories are added to the current shell PATH; WindowsApps Python aliases are not interpreters. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
@@ -24,10 +33,10 @@ After a reproducible, reviewed Hoen package exists, validate installation and ro
 
 ## Home network and clipboard
 
-The upstream direct-access loop in `src/rendezvous_mediator.rs` calls `listen_any` when direct access is enabled; this is not binding to the explicitly approved home interface. The code also has rendezvous, UDP punch and relay paths (`src/rendezvous_mediator.rs`, `src/server.rs`). The `whitelist` check in `src/server/connection.rs` admits all when empty or containing `0.0.0.0`; an address range or a generic Wi-Fi/private-IP check cannot identify the approved home network. Hoen needs an explicit policy that disables all non-approved transports and discovery, binds only the approved interface/address, verifies IPv4 and IPv6 peers, fails closed on network changes, and is complemented by reviewed host firewall rules. Prove no public rendezvous/relay, UPnP or port forwarding is used; do not assume direct mode disables them. Authentication and peer identity pinning are separate from network admission.
+The current Hoen runtime has a direct native TCP path. Upstream also has rendezvous, UDP punch and relay paths (`src/rendezvous_mediator.rs`, `src/server.rs`), but these are not yet connected to Hoen's verified handshake and mailbox proof. The network path is not an access rule: local, VPN, Internet and relay paths are acceptable once each preserves verified channel binding and grant authentication. Do not expose an unverified fallback. Listener binding and firewall configuration remain deployment work, separate from authorization.
 
 Stock rich clipboard support is permitted: `src/clipboard.rs` handles text, HTML, RTF, images, file URLs and special formats. Clipboard and file-transfer permissions are distinct (`enable-clipboard` and `enable-file-transfer` in `libs/base/src/config/keys.rs`), so test the actual chosen permissions and avoid logging clipboard payloads. Do not add a text-only filter.
-A useful next coding slice is a fail-closed Hoen policy gate with narrowly scoped hooks at the direct listener and connection admission: explicit approved local address/interface plus peer policy, no rendezvous/relay path under Hoen mode, and tests for disabled/missing/changed configuration and both IP families. The host must not advertise readiness until mailbox registration/secrets integration, enrolled peer authentication and real Windows acceptance tests are complete. No existing runtime path was modified by this document.
+The host must not advertise readiness until mailbox registration/secrets integration, enrolled peer authentication and real Windows acceptance tests are complete. The direct TCP path binds a configured local address today; additional transports need implementation and tests under the same mailbox authorization rule.
 
 
 ## User-local setup steps
@@ -93,11 +102,26 @@ After the user enabled Developer Mode and `flutter pub get` succeeded, the root 
 
 On November 5, 2026, the root application compiled the new `hoen-mailbox` modules with Rust 1.75. The expanded test run passed all 15 selected tests using `cargo +1.75.0 test --release --config profile.release.lto=false --lib --features flutter,hwcodec,vram,hoen-mailbox hoen::`. This test profile disables link-time optimization; it does not change the shipping build defaults. The first smaller seven-test release run also passed with the default release profile. Logs are in `%LOCALAPPDATA%\HoenBuildTools\hoen-integration-final-test.log` and `hoen-integration-test.log`.
 
-The tests cover real loopback TCP encryption and matching channel bindings, host pin/signature/version rejection, replayed greetings without encrypted confirmation, payloads above the temporary handshake limit, network policy, synthetic Windows DPAPI storage/tamper rejection, worker configuration failure, stable history intents and durable outbox reopen ordering. Separately, the typed HTTPS auth client passed seven tests and Clippy; the history crate passed nine tests. These tests do not establish a real approved Wi-Fi connection, active desktop capture/control, or unattended service behavior.
+The tests cover real loopback TCP encryption and matching channel bindings, host pin/signature/version rejection, replayed greetings without encrypted confirmation, payloads above the temporary handshake limit, synthetic Windows DPAPI storage/tamper rejection, worker configuration failure, stable history intents and durable outbox reopen ordering. Separately, the typed HTTPS auth client passed seven tests and Clippy; the history crate passed nine tests. These tests do not establish active desktop capture/control or unattended service behavior.
 
 The new native modules are not called by the existing desktop session loops yet. Remaining gates include enrollment and protected configuration provisioning, viewer/host startup hooks, final admission and small-frame/liveness checks, network-change teardown, lifecycle history hooks, live mailbox API reconciliation/deployment, installation/rollback and two-machine acceptance. No host service or firewall rule was installed. Area51 has begun the separately authorized matching-baseline build setup; its comparison timings remain pending.
 
 Regression surface at this checkpoint: the root Cargo manifests/lock add optional dependencies and OS bindings; `src/lib.rs` adds a feature-gated module; client-only protobuf definitions add optional fields; Windows/Mac CI commands include the feature tests. Existing desktop login, capture, input, clipboard, and service runtime paths are unchanged. No `hbb_common` submodule change was made.
+
+## Superseding direct-LAN policy (seq191)
+
+Earlier approved-home-interface/network language above is superseded: permit
+any same LAN over physical Wi-Fi or Ethernet without SSID, network GUID,
+named-network or adapter pins and without requiring a Windows Private profile.
+Do not change MeshMonkey or another network profile for Hoen authorization;
+seq189's request is superseded. Keep actual socket/interface and on-link route
+checks with cryptographic mailbox identity and single-use grants. No public
+rendezvous/relay, router exposure, password or manual-approval fallback is
+permitted. Firewall provisioning remains a separate reviewed integration step.
+VPN transport may be added under a separately reviewed future policy.
+Seq193 published `b9ade1684` and `d750e367e`; their code/build changes have
+been reviewed and integrated locally. Windows runtime and two-machine acceptance
+remain unverified on this Mac. See HOEN-MAC.md for integration status.
 
 ### Native host/viewer hook checkpoint
 
@@ -112,3 +136,29 @@ Installation, secure LocalSystem enrollment, isolated application/service naming
 ### Integrated Windows executable check
 
 The feature-enabled application build at checkpoint `1dba2ab` completed with exit 0 in 957.28 seconds (15 minutes 57 seconds wall time). Cargo reported 11 minutes 48 seconds and Flutter 130.1 seconds. Command: `python build.py --portable --flutter --skip-portable-pack --hwcodec --vram --hoen-mailbox`, with the previously documented user-local toolchain. Log: `%LOCALAPPDATA%\HoenBuildTools\hoen-integrated-app-build.log`. Running the actual Windows runner with `--hoen-import-viewer` and synthetic invalid JSON `{}` on stdin returned exit code 1 within the bounded wait, confirming import failure propagation through the native runner. It did not provision credentials or start a host. Later naming and first-start changes require a fresh build; this artifact predates those changes. Installation and unattended desktop behavior remain unverified.
+
+The subsequent first-start checkpoint `efb49e688` built with the same command and shipping release settings, exit 0 in 524.42 seconds (8 minutes 44 seconds wall time). Cargo reported 8 minutes 23 seconds; Flutter 17.9 seconds. Log: `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-first-start-app-build.log`. Actual runner checks for both import commands with synthetic invalid `{}` input and `--service-control invalid` each returned exit code 1. No installer or SCM mutation was invoked. The 91-file release payload passed the installer's read-only manifest generation and exact recheck. Executable SHA-256: `7cd140615ffd3a89ce82bb9f798b115d71305599eb96f9e661c4249696b4f4f0`; DLL SHA-256: `06f1ea1fae232f1a65814c5fea5de84b289c898d657320eb9e23e2c7a08ee6b5`. This validates a build and command rejection, not first startup under LocalSystem, UI operation, installation/rollback or a desktop session.
+
+### Machine identity broker artifact (2026-11-06)
+
+Checkpoint `eab9d7d87` completed the same shipping release build: Cargo reported 8 minutes 28 seconds and Flutter 15.0 seconds in `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-broker-app-build.log`. These are component timings, not a measured total wall time. The feature suite passed 38 tests; the feature-off unauthorized-admission regression suite passed 3 tests. The actual runner rejected synthetic invalid viewer import input with exit code 1. The freshly generated install manifest passed an exact read-only payload recheck.
+
+Executable SHA-256: `de9d851ac39330fad1d3c979d8d99f472dc9a1d4b44d4215202aa872cc27196d`; DLL SHA-256: `47699b3114c0c555bb41a4b5a86dbd9ca2172441bf4231c0ac74245a43af157a`.
+
+This artifact includes the Windows viewer's authenticated service broker, so it can request connection proofs using the machine identity without a second user credential import. Installed LocalSystem startup, live broker IPC, desktop capture/control and installer rollback remain unverified. Production use also requires a mailbox certificate with the correct SAN; the existing SAN-less certificate is not accepted by the native TLS verifier. This historical artifact predates the user's confirmed path-independent authorization rule. No service was installed or started by these checks.
+
+### Isolated worker cleanup artifact (2026-11-06)
+
+Checkpoint `f2d1724ee` completed the shipping Windows build with exit 0 in **520.63 seconds (8 minutes 41 seconds)**. Cargo reported 8 minutes 23 seconds and Flutter 14.6 seconds. The actual runner rejected synthetic invalid viewer enrollment with exit 1, and the installer passed generation and exact rechecking of the new payload manifest. Log and measured result: `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-f2d1724ee-build.log` and `remote-desktop-f2d1724ee-build-result.json`.
+
+Executable SHA-256: `46487d447a38b035805ea9e8a7d6a5ec7c04327e84bbdaec7d241ce849c78d2a`; DLL SHA-256: `b0a5e6605eb27382adde8bd0ef4cba8647e24dcc0333b307b0bf9ffba5251209`. This includes the mailbox worker's stock privacy-broker cleanup guard. No service installation or live desktop session was performed.
+
+A startup supervision review confirmed that a failed host returns from the worker and is normally relaunched in a fresh process, which revalidates the network and resets cached runtime state. The current service checks worker exit on an idle IPC timeout; sustained IPC traffic can delay recovery, and persistent startup failures can retry roughly every 300 ms. An independent bounded-backoff supervision check remains necessary before claiming reliable unattended startup. A missing console session or failure to obtain a Winlogon token is still a live acceptance concern. This review does not change the user's waiver of the network-change disconnect test.
+
+### Supervised service artifact (2026-11-06)
+
+Checkpoint `40870ebf6` completed the shipping Windows build with exit 0 in **522.24 seconds (8 minutes 42 seconds)**. Cargo reported 8 minutes 24 seconds; Flutter reported 15.8 seconds. The rebuilt payload passed manifest generation and exact rechecking, and the actual runner rejected synthetic invalid viewer import input with exit 1. Log and measured result: `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-40870ebf6-build.log` and `remote-desktop-40870ebf6-build-result.json`.
+
+Executable SHA-256: `690178cea5cae19b471e5c269a907bad3c3c50bfb0db3ad15bab24b2fce86029`; DLL SHA-256: `2cd9611edab1dffd8ccd556d6add15a424726e79695c59137dd6466c214c44dc`. This artifact includes bounded worker supervision, owned-worker shutdown, and connect-only mailbox GUI startup. Its tested source checkpoint is described in [installation and supervision](HOEN-INSTALLER.md). Installed LocalSystem lifecycle and actual desktop sessions remain unverified.
+
+A read-only authenticated production registry query returned HTTP 200 with an empty machine list. No existing production desktop key was found to migrate at that observation; startup must still enforce fingerprint consistency against the then-current registry. Mac received certificate-preparation follow-up message 208; no certificate rotation, provisioning, installation or firewall change was performed.

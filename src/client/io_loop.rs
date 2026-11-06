@@ -267,10 +267,15 @@ impl<T: InvokeUiSession> Remote<T> {
             let entered = self.handler.get_id();
             let name = entered.strip_prefix("hoen:").unwrap_or(&entered);
             let host = hoen_mailbox_auth::mailbox::Identity::new(name)?;
+            #[cfg(windows)]
+            let (transport, proof) = crate::hoen::transport::Transport::connect_via_service(host).await?;
+            #[cfg(not(windows))]
+            let (transport, proof) = {
             let runtime = crate::hoen::runtime::viewer().await?;
-            let (transport, proof) = crate::hoen::transport::Transport::connect(
+            crate::hoen::transport::Transport::connect(
                 runtime.policy.clone(), &runtime.mailbox, host, &runtime.signing_key, runtime.monitor.clone(),
-            ).await?;
+            ).await?
+            };
             let (peer, guard) = transport.into_parts();
             if !peer.is_secured() { bail!("mailbox transport is not encrypted"); }
             let host_key = guard.channel.host_key.to_vec();

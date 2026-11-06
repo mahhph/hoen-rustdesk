@@ -7,6 +7,7 @@
 //! resolve a verified principal before creating a history event.
 
 pub mod delivery;
+mod tls_pin;
 
 use std::{fmt, path::Path, time::Duration};
 

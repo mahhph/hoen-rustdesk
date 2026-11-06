@@ -25,7 +25,7 @@ function New-Fixture {
         Service=[pscustomobject]@{Service='Any'}
     }
 }
-$local=$null; $active=$null; $createCount=0; $removeCount=0; $queryFailure=$false; $makeActive=$true
+$local=$null; $active=$null; $createCount=0; $removeCount=0; $queryFailure=$false; $makeActive=$true; $modifyAfterCreate=$false
 $unrelated=[pscustomobject]@{Name='Unrelated.Rule';Present=$true}
 function Get-RuleSnapshot([string]$PolicyStore) {
     if($script:queryFailure){throw 'synthetic query failure'}
@@ -35,6 +35,7 @@ function Get-RuleSnapshot([string]$PolicyStore) {
 function New-NetFirewallRule {
     $script:createCount++
     $script:local=New-Fixture
+    if($script:modifyAfterCreate){$script:local.Port.LocalPort='9999'}
     if($script:makeActive){$script:active=$script:local}
 }
 function Remove-NetFirewallRule {
@@ -73,5 +74,8 @@ Expect-Failure { Invoke-FirewallPolicy 'Configure' $program $port } '*synthetic 
 if($createCount -ne 1){throw 'Query failure treated as absence.'}
 $queryFailure=$false; $makeActive=$false
 Expect-Failure { Invoke-FirewallPolicy 'Configure' $program $port } '*not active as expected*'
-if($null -eq $local -or $removeCount -ne 1){throw 'Inactive rule cleanup was unsafe.'}
+if($null -ne $local -or $removeCount -ne 2 -or -not $unrelated.Present){throw 'Inactive rule cleanup failed or touched another rule.'}
+$makeActive=$true; $modifyAfterCreate=$true
+Expect-Failure { Invoke-FirewallPolicy 'Configure' $program $port } '*cleanup requires review*'
+if($null -eq $local -or $removeCount -ne 2 -or -not $unrelated.Present){throw 'Changed rule was deleted during cleanup.'}
 'Firewall mock lifecycle and native-shaped filter tests passed.'

@@ -1,0 +1,34 @@
+name: Windows installer guards
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/*remote-desktop*.ps1'
+      - '.github/workflows/windows-installer.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/*remote-desktop*.ps1'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check installer, firewall and upgrade guards
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./scripts/test-remote-desktop-service-installer.ps1
+          & ./scripts/test-remote-desktop-firewall.ps1
+          & ./scripts/test-remote-desktop-installer-firewall.ps1
+          & ./scripts/test-remote-desktop-upgrade.ps1

@@ -22,11 +22,11 @@ Acceptance criteria:
 
 First increment: a separately invocable, tested firewall lifecycle helper. Integration into the full installer and a fresh-machine trial remain required before closing the story.
 
-Evidence (2026-11-06): `scripts/remote-desktop-firewall.ps1` implements explicit-port Validate/Configure/Remove. `scripts/test-remote-desktop-firewall.ps1` passed mocked lifecycle/filter checks on Windows PowerShell 5.1; the existing installer process/stop guards also passed. Native filter representations were checked read-only against Lenovo's existing rule. No live rule or service was changed, and no fresh-machine trial is claimed. Next step: retain the approved listener port in protected installation metadata so installer lifecycle actions can call the helper without reading encrypted service credentials.
+Initial evidence (2026-11-06): `scripts/remote-desktop-firewall.ps1` implements explicit-port Validate/Configure/Remove. Mocked lifecycle/filter checks and the existing installer process/stop guards passed. Native filter representations were checked read-only against Lenovo's existing rule. The subsequent installer integration retains approved port/ownership metadata and includes explicit legacy adoption, documented below. No live rule or service was changed during development, and no fresh-machine trial is claimed.
 
 ## PRD-02 — Upgrade and rollback without losing identity
 
-**Status:** Ready. **Priority:** P0. **Depends on:** PRD-01.
+**Status:** In progress. **Priority:** P0. **Depends on:** PRD-01.
 
 As an administrator, I want to upgrade or roll back without recreating credentials, losing history or leaving the machine unusable.
 
@@ -38,6 +38,8 @@ Acceptance criteria:
 - Preserve protected enrollment and durable history without decrypting or weakening their permissions. Verify the registered public key remains unchanged after upgrade and rollback.
 - Exercise install failure, activation failure and interrupted replacement in an isolated test environment. Recovery restores a usable verified package and truthful service/firewall state; it does not silently rotate identity.
 - Record both old/new versions and final outcome without credentials. Demonstrate one successful upgrade and one rollback with remote reconnection.
+
+Implementation checkpoint: installer/firewall integration and protected public port/ownership metadata are implemented, with explicit legacy adoption. The standalone upgrade tool stages a verified replacement, retains the old package and supports verified restore/recovery between directory moves. PowerShell 5.1 and 7 isolated filesystem tests passed; service state checks were simulated. Use [the controlled test guide](INSTALLER-TEST-GUIDE.md) for live validation. Automatic session drain, deployment orchestration, recovery-workspace retirement, live activation/reconnection and identity/history continuity remain acceptance work. PRD-01's fresh-machine trial is also still open.
 
 ## PRD-03 — Signed, traceable releases
 

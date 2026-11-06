@@ -3431,9 +3431,10 @@ impl Connection {
                             == crate::input::MOUSE_TYPE_DOWN;
                         let reported = if button { &REPORTED_BUTTON } else { &REPORTED_MOUSE };
                         if !reported.swap(true, Ordering::Relaxed) {
-                            log::warn!("Mac remote input: kind={}, host_control={}, viewer_disabled_control={}, accessibility={}",
+                            log::warn!("Mac remote input: kind={}, host_control={}, viewer_disabled_control={}, accessibility={}, screen_recording={}",
                                 if button { "button" } else { "pointer" }, self.keyboard,
-                                self.disable_keyboard, crate::platform::macos::is_process_trusted(false));
+                                self.disable_keyboard, crate::platform::macos::is_process_trusted(false),
+                                crate::platform::macos::is_can_screen_recording(false));
                         }
                     }
                     #[cfg(any(target_os = "android", target_os = "ios"))]

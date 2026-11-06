@@ -25,6 +25,10 @@ pub(crate) async fn run() -> ResultType<()> {
         return Ok(());
     }
     let runtime = super::runtime::host().await?;
+    #[cfg(target_os = "macos")]
+    hbb_common::log::warn!("Mac host permissions: accessibility={}, screen_recording={}",
+        crate::platform::macos::is_process_trusted(false),
+        crate::platform::macos::is_can_screen_recording(false));
     let mut network_changes = runtime.monitor.subscribe();
     let captured = runtime.monitor.state();
     if captured.closed {

@@ -12,6 +12,12 @@ unattended service, clipboard-format, or session-history acceptance.
 
 ## Mac host development: shared device identity
 
+On November 6, 2026, Area 51 connected to the signed development host. After
+the user granted the running app Device Control and Screen Recording access,
+the host reported both permissions available, and the user confirmed that mouse
+and keyboard control worked. This interactive trial does not establish unattended
+login-time operation or production signing and installation readiness.
+
 The development client can provision a separate host Keychain entry from its
 existing protected viewer entry with `--hoen-provision-host-from-viewer`. This
 explicit operation reuses the same mailbox identity, trust, credential and
@@ -38,7 +44,10 @@ run its signed executable with `--hoen-host-permissions` from the intended
 logged-in account. It reports Screen Recording and Accessibility separately,
 and exits unsuccessfully if either is missing. Grant permissions to the same
 app in System Settings before a live host test. This check does not start a
-listener, access Keychain, or establish that capture and input work.
+listener, access Keychain, or establish that capture and input work. macOS can
+attribute a command-line check differently from the running app: on November 6
+the standalone check reported access while the actual host reported Accessibility
+denied. The running host now logs its own non-prompting permission state at startup.
 
 Current seq210 integration supersedes earlier network policy and readiness notes below.
 The native TCP transport checks its configured local binding; adapter/network IDs,

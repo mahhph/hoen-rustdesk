@@ -24,10 +24,12 @@ service or a production installer.
 
 The logged-in Mac app also keeps its host controller available while hosting
 is disabled, so enabling the service later does not require restarting the
-app. If host startup fails, the controller logs the failure and stops rather
-than repeatedly requesting Keychain access. A restart is currently required
-after correcting that failure. This behavior does not establish login-time
-startup or automatic recovery from network changes.
+app. After the protected host runtime initializes, the controller retries a
+failed listener every 15 seconds using the same runtime and history worker.
+An initialization failure stops the controller rather than repeatedly requesting
+Keychain access; restart the app after correcting that failure. A retry uses the
+address resolved when the runtime initialized; a changed address requires an app
+restart. This behavior does not establish login-time startup.
 The Mac host acquires the app's local control socket before starting hosting;
 if another instance owns it, the new host stops without closing that instance.
 
@@ -65,4 +67,4 @@ The following commands are development setup operations for the signed applicati
 - `--hoen-network-identifiers` displays opaque candidate adapter and network identifiers and the current local IPv4 address. Discovery is not approval. Independently verify the intended Wi-Fi before using these identifiers in an enrollment bundle; do not place mailbox tokens or private keys in command arguments or logs.
 - `--hoen-import-host` reads the validated enrollment bundle only from standard input and saves it to the user's Keychain.
 
-The code and synthetic tests do not establish production readiness. A signed application and stable signing identity, explicit network approval, real-device enrollment, a second authenticated machine, screen-recording and accessibility permissions, real Wi-Fi and reboot transitions, and complete interactive session tests remain necessary. The macOS network observer and Keychain behavior must also be verified in the installed application's actual launch-agent context. A login-time address change only works when the mailbox service itself remains reachable and its TLS identity still validates.
+The code and synthetic tests do not establish production readiness. A stable signing identity, a real Windows-to-Mac session, capture and input permission checks, reboot transitions, and complete interactive session tests remain necessary. The macOS network observer and Keychain behavior must also be verified in any installed launch-agent context. A login-time address change only works when the mailbox service itself remains reachable and its TLS identity still validates.

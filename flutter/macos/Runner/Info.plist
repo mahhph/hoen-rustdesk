@@ -43,12 +43,6 @@
 	<string>MainMenu</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record the sound from microphone for the purpose of the remote desktop.</string>
-	<key>NSLocationUsageDescription</key>
-	<string>Identify your approved Wi-Fi network before allowing remote desktop connections.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Identify your approved Wi-Fi network before allowing remote desktop connections.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Identify your approved Wi-Fi network while the remote desktop host runs in the background.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
     <key>LSUIElement</key>

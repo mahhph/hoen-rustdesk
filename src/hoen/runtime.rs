@@ -370,7 +370,7 @@ pub(crate) fn import_enrollment(
         let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
         super::macos_private_dir::history(std::path::Path::new(&home))?;
     }
-    store.write(secret).map_err(|_| anyhow!("cannot save protected mailbox enrollment"))
+    store.write_new(secret).map_err(|_| anyhow!("cannot create protected mailbox enrollment; an existing enrollment is not replaced"))
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]

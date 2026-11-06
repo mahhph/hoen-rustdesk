@@ -8,6 +8,7 @@ const SERVICE: &str = "com.hoensolutions.remote.enrollment.v1";
 #[cfg(feature = "hoen-mac-dev")]
 const SERVICE: &str = "com.hoensolutions.remote.development.enrollment.v1";
 const ITEM_NOT_FOUND: i32 = -25300;
+const DUPLICATE_ITEM: i32 = -25299;
 
 /// Separate entries for host and viewer. Keychain ACLs identify the executable, not its role:
 /// these names alone do not isolate two processes running as the same user and executable.
@@ -35,6 +36,18 @@ impl MacStore {
             Purpose::Viewer => "viewer",
             Purpose::HostService => "host",
         }
+    }
+
+    /// Provision only an absent identity; never replace an existing signing key.
+    pub(crate) fn write_new(&self, secret: &Secret) -> Result<(), StoreError> {
+        self.keychain
+            .add_generic_password(SERVICE, self.account(), secret.expose())
+            .map(|_| ())
+            .map_err(|error| if error.code() == DUPLICATE_ITEM {
+                StoreError::AlreadyExists
+            } else {
+                StoreError::Unavailable
+            })
     }
 }
 
@@ -104,6 +117,8 @@ mod tests {
         viewer.write(&other).expect("write viewer");
         host.write(&next).expect("replace host");
         assert_eq!(host.read().unwrap().expose(), b"test-host-updated");
+        assert_eq!(viewer.read().unwrap().expose(), b"test-viewer");
+        assert!(matches!(viewer.write_new(&first), Err(StoreError::AlreadyExists)));
         assert_eq!(viewer.read().unwrap().expose(), b"test-viewer");
     }
 }

@@ -351,11 +351,11 @@ fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
     bail!("protected mailbox enrollment is not implemented on this platform");
 }
 
-async fn initialize(purpose: Purpose) -> ResultType<Arc<Runtime>> {
+async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>> {
     let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
     let leaf_pin = enrollment.mailbox_leaf_fingerprint.as_deref()
         .map(Fingerprint::parse).transpose()?.map(|pin| *pin.as_bytes());
-    if purpose == Purpose::HostService && !enrollment.hosting_enabled {
+    if hosting && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
     }
     let mut policy = network::Policy {
@@ -395,7 +395,7 @@ async fn initialize(purpose: Purpose) -> ResultType<Arc<Runtime>> {
     let identity = Identity::new(&enrollment.identity)?;
     let (public, signing_key) = sign::keypair_from_seed(&sign::Seed(enrollment.signing_seed));
     let fingerprint = Fingerprint::from_bytes(Sha256::digest(public.0).into());
-    let history = if purpose == Purpose::HostService {
+    let history = if hosting {
         let token = ApiToken::new(enrollment.access_token.clone())?;
         Some(
             HistoryWorker::start_with_pin(
@@ -448,18 +448,26 @@ async fn initialize(purpose: Purpose) -> ResultType<Arc<Runtime>> {
 
 static VIEWER: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 static HOST: OnceCell<Arc<Runtime>> = OnceCell::const_new();
+#[cfg(windows)]
+static MACHINE: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 
 pub(crate) async fn viewer() -> ResultType<Arc<Runtime>> {
     Ok(VIEWER
-        .get_or_try_init(|| initialize(Purpose::Viewer))
+        .get_or_try_init(|| initialize(Purpose::Viewer, false))
         .await?
         .clone())
 }
 pub(crate) async fn host() -> ResultType<Arc<Runtime>> {
     Ok(HOST
-        .get_or_try_init(|| initialize(Purpose::HostService))
+        .get_or_try_init(|| initialize(Purpose::HostService, true))
         .await?
         .clone())
+}
+
+/// SCM broker uses the same protected identity without owning the host worker's outbox.
+#[cfg(windows)]
+pub(crate) async fn machine_for_service() -> ResultType<Arc<Runtime>> {
+    Ok(MACHINE.get_or_try_init(|| initialize(Purpose::HostService, false)).await?.clone())
 }
 
 #[cfg(test)]

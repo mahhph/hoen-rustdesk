@@ -1,18 +1,26 @@
 <#
 .SYNOPSIS
-Plans, installs disabled, or rolls back the dedicated Remote Desktop Service.
+Plans, installs, activates, deactivates, or rolls back Remote Desktop Service.
 .DESCRIPTION
 Plan is read-only and emits a JSON payload hash manifest for independent review.
 Install requires that reviewed manifest and creates only a new, disabled service.
-The service cannot be used until its runtime name, protected enrollment, and
-startup configuration are integrated. Rollback only removes an unchanged install.
-Run in an elevated Windows PowerShell session only for Install or Rollback.
+Activate starts the service; SCM Running does not indicate host readiness.
+Deactivate stops and disables it. Rollback removes only an unchanged disabled install.
+Run in an elevated Windows PowerShell session for actions other than Plan.
 .EXAMPLE
 .\scripts\remote-desktop-service-installer.ps1 -SourceDirectory C:\build\Release
+.EXAMPLE
+.\scripts\remote-desktop-service-installer.ps1 -Action Install -SourceDirectory C:\build\Release -ExpectedManifest C:\review\manifest.json -ClientConfigPath C:\private\client.json -ApprovedConfigPath C:\review\approved-network.json
+.EXAMPLE
+.\scripts\remote-desktop-service-installer.ps1 -Action Activate
+.EXAMPLE
+.\scripts\remote-desktop-service-installer.ps1 -Action Deactivate
+.EXAMPLE
+.\scripts\remote-desktop-service-installer.ps1 -Action Rollback
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Plan','Install','Rollback')][string]$Action = 'Plan',
+    [ValidateSet('Plan','Install','Activate','Deactivate','Rollback')][string]$Action = 'Plan',
     [string]$SourceDirectory,
     [string]$ExpectedManifest,
     [string]$ClientConfigPath,
@@ -39,7 +47,7 @@ function Assert-NoReparse([string]$Path) {
 }
 function Require-Administrator {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Install and rollback require an elevated administrator.' }
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'This action requires an elevated administrator.' }
 }
 function Get-SafeEntries([string]$Root) {
     $pending=[Collections.Generic.Stack[string]]::new(); $pending.Push($Root)
@@ -89,8 +97,79 @@ function Assert-ManifestMatches($Manifest, [object[]]$Actual) {
 function Get-OwnService {
     @(Get-CimInstance Win32_Service -Filter "Name='$serviceName'")
 }
+function Assert-OwnServiceIdentity($Service) {
+    if ($Service.Name -cne $serviceName -or $Service.PathName -cne $serviceCommand -or $Service.StartName -ne 'LocalSystem' -or $Service.ServiceType -cne 'Own Process') { throw 'Service identity does not match this install; refusing mutation.' }
+}
 function Assert-OwnService($Service) {
-    if ($Service.Name -cne $serviceName -or $Service.PathName -cne $serviceCommand -or $Service.StartName -ne 'LocalSystem' -or $Service.State -ne 'Stopped' -or $Service.StartMode -ne 'Disabled') { throw 'Existing service does not match this disabled install; refusing mutation.' }
+    Assert-OwnServiceIdentity $Service
+    if ($Service.State -ne 'Stopped' -or $Service.StartMode -ne 'Disabled') { throw 'Existing service is not stopped and disabled; refusing mutation.' }
+}
+function Assert-NoServiceDependencies {
+    $controller=[ServiceProcess.ServiceController]::new($serviceName)
+    try {
+        $dependencies=@($controller.ServicesDependedOn)
+        try { if ($dependencies.Count -ne 0) { throw 'Unexpected service dependencies; refusing mutation.' } }
+        finally { foreach ($dependency in $dependencies) { $dependency.Dispose() } }
+    } finally { $controller.Dispose() }
+}
+function Get-VerifiedService {
+    $matches=@(Get-OwnService)
+    if ($matches.Count -ne 1) { throw 'Expected exactly one matching service.' }
+    Assert-OwnServiceIdentity $matches[0]
+    Assert-NoServiceDependencies
+    return $matches[0]
+}
+function Wait-OwnServiceState([string[]]$Allowed, [int]$TimeoutSeconds = 30) {
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $current=Get-VerifiedService
+        if ($current.State -in $Allowed) { return $current }
+        if ($timer.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Timed out waiting for service state.' }
+        Start-Sleep -Milliseconds 250
+    } while ($true)
+}
+function Set-OwnServiceMode([string]$Mode) {
+    Set-Service -Name $serviceName -StartupType $Mode -ErrorAction Stop
+}
+function Start-OwnServiceProcess {
+    $controller=[ServiceProcess.ServiceController]::new($serviceName)
+    try { $controller.Start() } finally { $controller.Dispose() }
+}
+function Stop-OwnServiceProcess {
+    # ServiceController.Stop() also stops dependents. The SCM stop request fails
+    # instead if another running service depends on this one.
+    & $scExe stop $serviceName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Service stop request failed.' }
+}
+function Disable-AndStopOwnService {
+    $current=Get-VerifiedService
+    if ($current.StartMode -notin @('Auto','Disabled')) { throw 'Unexpected service startup mode; refusing mutation.' }
+    if ($current.StartMode -ne 'Disabled') {
+        Set-OwnServiceMode 'Disabled'
+        $current=Get-VerifiedService
+        if ($current.StartMode -ne 'Disabled') { throw 'Service could not be disabled.' }
+    }
+    if ($current.State -eq 'Start Pending') { $current=Wait-OwnServiceState @('Running','Stopped') }
+    if ($current.State -eq 'Running') {
+        Stop-OwnServiceProcess
+        $current=Wait-OwnServiceState @('Stopped')
+    } elseif ($current.State -eq 'Stop Pending') { $current=Wait-OwnServiceState @('Stopped') }
+    if ($current.State -ne 'Stopped' -or $current.StartMode -ne 'Disabled') { throw 'Service did not reach stopped and disabled state.' }
+}
+function Activate-OwnService {
+    Assert-OwnService (Get-VerifiedService)
+    try {
+        Set-OwnServiceMode 'Automatic'
+        $current=Get-VerifiedService
+        if ($current.StartMode -ne 'Auto' -or $current.State -ne 'Stopped') { throw 'Service did not reach the expected pre-start state.' }
+        Start-OwnServiceProcess
+        $current=Wait-OwnServiceState @('Running')
+        if ($current.StartMode -ne 'Auto') { throw 'Service startup mode changed during activation.' }
+    } catch {
+        $original=$_
+        try { Disable-AndStopOwnService } catch { throw "Activation failed; stopping and disabling also failed: $($_.Exception.Message). Original: $($original.Exception.Message)" }
+        throw "Activation failed; the service was stopped and disabled. $($original.Exception.Message)"
+    }
 }
 function New-InstallSecurity {
     $security = [Security.AccessControl.DirectorySecurity]::new()
@@ -247,9 +326,7 @@ Initialize-InstallNative
 $held=Hold-DirectoryChain $target
 try {
 Assert-InstallSecurity $target
-$own = @(Get-OwnService)
-if ($own.Count -ne 1) { throw 'Expected exactly one matching service.' }
-Assert-OwnService $own[0]
+$own = Get-VerifiedService
 $installedManifest = Join-Path $target $manifestName
 Assert-NoReparse $installedManifest
 $manifest = Get-Content -LiteralPath $installedManifest -Raw | ConvertFrom-Json
@@ -259,6 +336,17 @@ $rootPrefix = $target.TrimEnd('\') + '\'
 $files = @($actual | ForEach-Object { [pscustomobject]@{ path=$_.FullName.Substring($rootPrefix.Length); size=[long]$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } } | Sort-Object path)
 Assert-ManifestMatches $manifest $files
 Assert-OnlyManagedDirectories $files
+if ($Action -eq 'Activate') {
+    Activate-OwnService
+    Write-Output 'Service started with automatic startup. SCM running does not establish remote host readiness.'
+    return
+}
+if ($Action -eq 'Deactivate') {
+    Disable-AndStopOwnService
+    Write-Output 'Service stopped and disabled. Installed files and enrollment data were retained.'
+    return
+}
+Assert-OwnService (Get-VerifiedService)
 & $scExe delete $serviceName | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Service deletion failed; files were retained.' }
 $held[$held.Count-1].Dispose()

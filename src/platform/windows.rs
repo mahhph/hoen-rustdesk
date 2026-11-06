@@ -702,6 +702,8 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     log::info!("session id {}", session_id);
     let mut h_process = launch_server(session_id, true).await.unwrap_or(NULL);
     let mut incoming = ipc::new_listener(crate::POSTFIX_SERVICE).await?;
+    #[cfg(feature = "hoen-mailbox")]
+    let proof_slots = Arc::new(tokio::sync::Semaphore::new(4));
     let mut stored_usid = None;
     loop {
         let sids: Vec<_> = get_available_sessions(false)
@@ -723,6 +725,11 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
         match res {
             Ok(res) => match res {
                 Some(Ok(stream)) => {
+                    // parity-tokio-ipc's pinned Tokio ServerOptions defaults to
+                    // PIPE_REJECT_REMOTE_CLIENTS. Preserve that local-only property.
+                    #[cfg(feature = "hoen-mailbox")]
+                    let mut stream = ipc::Connection::new_bounded(stream, 4096);
+                    #[cfg(not(feature = "hoen-mailbox"))]
                     let mut stream = ipc::Connection::new(stream);
                     // Keep IPC authorization consistent with the session we are currently serving.
                     // Recompute expected session right before authorization to avoid using a stale
@@ -735,6 +742,46 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                     }
                     if let Ok(Some(data)) = stream.next_timeout(1000).await {
                         match data {
+                            #[cfg(feature = "hoen-mailbox")]
+                            ipc::Data::HoenLookupRequest(request) => {
+                                if let Ok(permit) = proof_slots.clone().try_acquire_owned() {
+                                    tokio::spawn(async move {
+                                        let _permit = permit;
+                                        let result = tokio::time::timeout(
+                                            Duration::from_secs(20),
+                                            async {
+                                                let runtime = crate::hoen::runtime::machine_for_service().await?;
+                                                crate::hoen::local_proof::lookup(runtime, request).await
+                                            },
+                                        ).await.ok().and_then(Result::ok);
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_secs(1),
+                                            stream.send(&ipc::Data::HoenLookupResponse(result)),
+                                        ).await;
+                                    });
+                                }
+                            }
+                            #[cfg(feature = "hoen-mailbox")]
+                            ipc::Data::HoenProofRequest(request) => {
+                                // Never await mailbox I/O in the SCM/session loop.
+                                // A full queue drops the request and closes the pipe.
+                                if let Ok(permit) = proof_slots.clone().try_acquire_owned() {
+                                    tokio::spawn(async move {
+                                        let _permit = permit;
+                                        let result = tokio::time::timeout(
+                                            Duration::from_secs(20),
+                                            async {
+                                                let runtime = crate::hoen::runtime::machine_for_service().await?;
+                                                crate::hoen::local_proof::issue(runtime, request).await
+                                            },
+                                        ).await.ok().and_then(Result::ok);
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_secs(1),
+                                            stream.send(&ipc::Data::HoenProofResponse(result)),
+                                        ).await;
+                                    });
+                                }
+                            }
                             ipc::Data::Close => {
                                 log::info!("close received");
                                 break;

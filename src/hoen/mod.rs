@@ -6,6 +6,8 @@ pub(crate) mod enrollment;
 pub(crate) mod handshake;
 pub(crate) mod history_worker;
 pub(crate) mod host;
+#[cfg(windows)]
+pub(crate) mod local_proof;
 pub(crate) mod mailbox_worker;
 pub(crate) mod machine_bootstrap;
 pub(crate) mod network;

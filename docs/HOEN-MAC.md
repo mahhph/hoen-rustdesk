@@ -35,10 +35,10 @@ At commit `92dfd7e4aabe746f4c3acfbf4dd005d8aaedcdc6`, the upstream direct
 IP/domain branches in `src/client.rs` return a TCP connection before the shared
 secure handshake. `src/rendezvous_mediator.rs` uses `listen_any` for its direct
 server. These paths are shared across desktop platforms, including macOS; neither
-a direct address nor a listener proves approved-home-network admission or a
-verified mailbox identity. Do not expose the direct server as a Hoen host until
+a direct address nor a listener proves a verified encrypted channel or mailbox
+identity. Do not expose the direct server as a Hoen host until
 the planned authenticated handshake, grant validation, transport provenance,
-and approved-interface enforcement are implemented and tested. Follow
+and channel binding are implemented and tested. Follow
 `HOEN-AUTH.md`; do not use legacy fallback in Hoen mode.
 
 ## Evidence and remaining gates
@@ -46,8 +46,8 @@ and approved-interface enforcement are implemented and tested. Follow
 The isolated `hoen-mailbox-auth` crate's two tests pass on this Mac. This checks
 its canonical encoding and proof verification, not runtime authentication or a
 RustDesk session. A production-signed Mac build, bridge and dependency validation,
-actual capture/input/clipboard behavior, service lifecycle, local-network policy,
-and two-machine tests remain outstanding. Native RustDesk clipboard formats are
+actual capture/input/clipboard behavior, service lifecycle, encrypted channel and
+mailbox authentication, and two-machine tests remain outstanding. Native RustDesk clipboard formats are
 allowed; separate file-transfer sessions remain outside the current scope.
 
 ## Native adapter validation at 4095dc5 (mailbox seq165)
@@ -70,12 +70,12 @@ explicit provisioning/access policy and errors for locked or denied access.
 Do not substitute plaintext config storage. Device private keys and mailbox
 credentials remain local; mailbox identity is cryptographic, not a display name.
 
-`network::verify_binding` and `network::admit_socket` return
-`SnapshotUnavailable` on macOS. Both host and viewer must remain denied until
-an approved macOS interface/network policy, actual local/peer route checks and
-network-change revalidation are implemented. Windows adapter/network GUIDs
-are not an implemented macOS approval identity. Coordinate any shared policy
-contract change before coding it.
+`network::verify_binding` and `network::admit_socket` now use the portable
+configured-bind-address check from PR #2 on macOS as well as Windows. No OS
+network category, physical-interface type, SSID, adapter/network identifier or
+peer route grants or rejects access. These checks do not authenticate a peer;
+the encrypted handshake, pinned mailbox identities and single-use grant proof
+remain mandatory for both host and viewer.
 
 The seq159 TLS transition remains preparation only. Strict HTTPS clients need
 an explicitly provisioned trust root and a matching IP/DNS SAN leaf. The old
@@ -101,3 +101,39 @@ repeating the native adapter build. No app or package artifact was produced.
 Ruby Podfile syntax validation and `git diff --check` passed.
 Regression surface: only the Podfile deployment minimum changes existing
 macOS build behavior; shared runtime/protocol and feature-off code are untouched.
+
+## Final authentication rule (mailbox seq196)
+
+Request `48b19c96-5436-45b1-aec9-89d487cb2382` supersedes the network
+restrictions in seq189 and seq191. Local Wi-Fi, Ethernet, VPN, Internet and relay
+are permitted paths when the actual encrypted channel and mailbox identity plus
+single-use grant proof are verified. No unverified or legacy fallback is allowed.
+PR #2 at `5a7f2286cfa363b5f003f4b25f2466a3b4201b67` supplies the shared
+portable binding implementation used by Mac host and viewer. The current runtime
+implements direct native TCP only. Relay still needs its own verified transport
+and channel binding; its policy eligibility does not establish implementation.
+A network change may terminate a live connection; a fresh verified connection
+may use any reachable path. A configured local bind address is socket selection,
+not an approved-network identity.
+
+Mac platform gaps remain concrete: `runtime::load` rejects non-Windows protected
+enrollment, `credentials::ProtectedStore` exists only on Windows, and
+`network_monitor::start_blocking` returns `Unsupported` on macOS. Implement and
+validate protected Keychain enrollment for separate host/helper and viewer
+identities and connection lifecycle handling before enabling either role. Do
+not replace these failures with plaintext credentials or authentication bypasses.
+Native dependency/build validation, signed packaging, privacy permissions,
+locked/login-window behavior and two-machine acceptance remain incomplete.
+No service, listener, network setting or credential was changed by this update.
+
+Regression surface: the imported PR changes feature-gated Hoen socket binding,
+enrollment parsing, endpoint validation and Windows connection monitoring. Mac
+socket checks no longer reject by unsupported OS or route/interface policy.
+Existing feature-off RustDesk paths are unchanged. The additional Mac changes
+in this integration are documentation only; earlier Podfile changes are retained.
+
+Local seq196 validation on this Mac: both standalone `network.rs` tests passed
+with `rustc --edition 2021 --test src/hoen/network.rs`; the locked isolated
+`hoen-mailbox-auth` manifest passed all 7 tests with stable Rust. This verifies
+portable bind/path policy and proof/TLS contracts, not native runtime compilation
+or an authenticated desktop session. `git diff --check` passed.

@@ -19,6 +19,9 @@ const VERIFIED_UPDATE_COPY_FAILURE_EXIT_CODE: u32 = 0x5253_0009;
 const VERIFIED_EXE_LAUNCH_FAILURE_EXIT_CODE: u32 = 0x5253_000C;
 
 pub fn update_to_verified(file: &str, expected_sha256: &str, expected_size: u64) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let extension = file::update_file_extension(file).unwrap_or_default();
     if extension != "exe" && extension != "msi" {
         bail!("Unsupported update file format: {}", file);

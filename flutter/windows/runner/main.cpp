@@ -21,9 +21,31 @@ const std::vector<std::string> parameters_white_list = {"--install", "--cm"};
 
 const wchar_t* getWindowClassName();
 
+// Service commands run before Rust initialization. Load only the DLL beside this
+// executable so Hoen's marker is checked even when the current directory differs.
+static HMODULE LoadSiblingRustdeskLibrary() {
+  std::wstring path(32768, L'\0');
+  const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+  if (length == 0 || length >= path.size()) return nullptr;
+  path.resize(length);
+  const auto separator = path.find_last_of(L"\\/");
+  if (separator == std::wstring::npos) return nullptr;
+  path.resize(separator + 1);
+  path += L"librustdesk.dll";
+  return LoadLibraryExW(path.c_str(), nullptr,
+                        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+}
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command)
 {
+  if (service_control::IsCommand(command_line)) {
+    HMODULE library = LoadSiblingRustdeskLibrary();
+    if (!library) return EXIT_FAILURE;
+    const bool hoen = GetProcAddress(library, "rustdesk_hoen_experimental") != nullptr;
+    FreeLibrary(library);
+    if (hoen) return EXIT_FAILURE;
+  }
   if (auto result = service_control::HandleCommand(command_line)) {
     return static_cast<int>(*result);
   }
@@ -58,6 +80,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   char** c_args = rustdesk_core_main(&args_len);
   if (!c_args)
   {
+    // Hoen command errors use a negative length to distinguish them from normal exit.
+    if (args_len < 0) return EXIT_FAILURE;
     std::string args_str = "";
     for (const auto& argument : command_line_arguments) {
       args_str += (argument + " ");

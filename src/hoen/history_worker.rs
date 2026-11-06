@@ -117,6 +117,19 @@ impl HistoryWorker {
     where
         F: FnOnce() -> Result<ApiToken, WorkerError> + Send + 'static,
     {
+        Self::start_with_pin(path, capacity, url, root_pem, load_token, None).await
+    }
+    pub async fn start_with_pin<F>(
+        path: PathBuf,
+        capacity: usize,
+        url: String,
+        root_pem: Vec<u8>,
+        load_token: F,
+        pin: Option<[u8; 32]>,
+    ) -> Result<Self, WorkerError>
+    where
+        F: FnOnce() -> Result<ApiToken, WorkerError> + Send + 'static,
+    {
         let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
         let (started, ready) = oneshot::channel();
         thread::Builder::new()
@@ -125,8 +138,10 @@ impl HistoryWorker {
                 let init = (|| {
                     let outbox = Outbox::open(&path, capacity).map_err(WorkerError::Outbox)?;
                     let token = load_token()?;
-                    let delivery = MailboxDelivery::new(&url, &root_pem, token)
-                        .map_err(WorkerError::Delivery)?;
+                    let delivery = match pin {
+                        Some(pin) => MailboxDelivery::new_pinned(&url, &root_pem, token, pin),
+                        None => MailboxDelivery::new(&url, &root_pem, token),
+                    }.map_err(WorkerError::Delivery)?;
                     Ok::<_, WorkerError>((outbox, delivery))
                 })();
                 match init {
@@ -293,6 +308,14 @@ fn run(mut outbox: Outbox, delivery: MailboxDelivery, receiver: Receiver<Request
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[hbb_common::tokio::test]
+    async fn pinned_history_client_rejects_invalid_trust_before_delivery() {
+        let path = std::env::temp_dir().join(format!("hoen-history-pinned-{}.sqlite", Uuid::new_v4()));
+        let result = HistoryWorker::start_with_pin(path.clone(), 4, "https://localhost/".into(), Vec::new(), || ApiToken::new("A".repeat(43)).map_err(|_| WorkerError::Credential), Some([7;32])).await;
+        assert!(matches!(result, Err(WorkerError::Delivery(DeliveryError::InvalidConfiguration))));
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn bounded_retry_delays_never_spin_or_exceed_cap() {

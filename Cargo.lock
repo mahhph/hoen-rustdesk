@@ -3900,6 +3900,8 @@ dependencies = [
  "base64 0.21.7",
  "ed25519-dalek",
  "reqwest 0.11.27",
+ "rustls 0.21.12",
+ "rustls-pemfile",
  "serde 1.0.228",
  "serde_json 1.0.118",
  "sha2",
@@ -3914,8 +3916,11 @@ version = "0.1.0"
 dependencies = [
  "reqwest 0.11.27",
  "rusqlite",
+ "rustls 0.21.12",
+ "rustls-pemfile",
  "serde 1.0.228",
  "serde_json 1.0.118",
+ "sha2",
  "url",
  "uuid",
 ]

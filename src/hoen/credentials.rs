@@ -18,6 +18,7 @@ pub enum StoreError {
     Unavailable,
     CorruptOrWrongPurpose,
     Unsupported,
+    AlreadyExists,
 }
 /// Opaque secret material; callers define and version their serialized enrollment bundle.
 pub struct Secret(Vec<u8>);
@@ -151,6 +152,9 @@ mod windows_store {
                 sid,
             })
         }
+    }
+    pub(crate) fn ensure_system() -> Result<(), StoreError> {
+        identity(Purpose::HostService).map(|_| ())
     }
     fn descriptor(id: &Identity, inheritable: bool) -> Result<Local, StoreError> {
         unsafe {
@@ -454,11 +458,14 @@ mod windows_store {
             Ok(Some(unsafe { File::from_raw_handle(raw) }))
         }
     }
-    impl CredentialStore for ProtectedStore {
-        fn read(&self) -> Result<Secret, StoreError> {
+    impl ProtectedStore {
+        /// Only a confirmed missing file returns None. Access, ACL and decrypt errors fail closed.
+        pub fn read_optional(&self) -> Result<Option<Secret>, StoreError> {
             let id = identity(self.purpose)?;
             let _dirs = hold_directories(&self.directory, &id, false)?;
-            let mut file = self.open_existing(&id)?.ok_or(StoreError::Unavailable)?;
+            let Some(mut file) = self.open_existing(&id)? else {
+                return Ok(None);
+            };
             if file.metadata().map_err(|_| StoreError::Unavailable)?.len()
                 > (MAX_SECRET_BYTES + 8192) as u64
             {
@@ -470,9 +477,17 @@ mod windows_store {
             if !encrypted.starts_with(MAGIC) {
                 return Err(StoreError::CorruptOrWrongPurpose);
             }
-            Secret::new(crypto(&encrypted[MAGIC.len()..], self.purpose, false)?)
+            Ok(Some(Secret::new(crypto(
+                &encrypted[MAGIC.len()..],
+                self.purpose,
+                false,
+            )?)?))
         }
-        fn write(&self, secret: &Secret) -> Result<(), StoreError> {
+        /// Atomically installs a new sealed value; an existing destination is never replaced.
+        pub fn write_new(&self, secret: &Secret) -> Result<(), StoreError> {
+            self.write_impl(secret, false)
+        }
+        fn write_impl(&self, secret: &Secret, replace: bool) -> Result<(), StoreError> {
             let id = identity(self.purpose)?;
             let _dirs = hold_directories(&self.directory, &id, false)?;
             // Reject an existing unprotected or reparse target before replacement.
@@ -517,20 +532,35 @@ mod windows_store {
                     .map_err(|_| StoreError::Unavailable)?;
                 drop(file);
                 let dest = wide(self.directory.join(file_name(self.purpose)).as_os_str());
-                unsafe {
-                    MoveFileExW(
-                        PCWSTR(tmpw.as_ptr()),
-                        PCWSTR(dest.as_ptr()),
-                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-                    )
-                }
-                .map_err(|_| StoreError::Unavailable)?;
+                let flags = if replace {
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+                } else {
+                    MOVEFILE_WRITE_THROUGH
+                };
+                unsafe { MoveFileExW(PCWSTR(tmpw.as_ptr()), PCWSTR(dest.as_ptr()), flags) }
+                    .map_err(|e| {
+                        if !replace
+                            && (e.code().0 as u32 == 0x80070050 || e.code().0 as u32 == 0x800700b7)
+                        {
+                            StoreError::AlreadyExists
+                        } else {
+                            StoreError::Unavailable
+                        }
+                    })?;
                 Ok(())
             })();
             if result.is_err() {
                 let _ = std::fs::remove_file(tmp);
             }
             result
+        }
+    }
+    impl CredentialStore for ProtectedStore {
+        fn read(&self) -> Result<Secret, StoreError> {
+            self.read_optional()?.ok_or(StoreError::Unavailable)
+        }
+        fn write(&self, secret: &Secret) -> Result<(), StoreError> {
+            self.write_impl(secret, true)
         }
     }
     #[cfg(test)]
@@ -580,6 +610,18 @@ mod windows_store {
             }
             let _cleanup = Cleanup(path.clone());
             let store = ProtectedStore::open(&path, Purpose::Viewer).unwrap();
+            assert!(store.read_optional().unwrap().is_none());
+            store
+                .write_new(&Secret::new(b"first synthetic".to_vec()).unwrap())
+                .unwrap();
+            assert_eq!(
+                store.write_new(&Secret::new(b"must not replace".to_vec()).unwrap()),
+                Err(StoreError::AlreadyExists)
+            );
+            assert_eq!(
+                store.read_optional().unwrap().unwrap().expose(),
+                b"first synthetic"
+            );
             store
                 .write(&Secret::new(b"first synthetic".to_vec()).unwrap())
                 .unwrap();
@@ -595,6 +637,10 @@ mod windows_store {
             std::fs::write(&target, encrypted).unwrap();
             assert!(matches!(
                 store.read(),
+                Err(StoreError::CorruptOrWrongPurpose)
+            ));
+            assert!(matches!(
+                store.read_optional(),
                 Err(StoreError::CorruptOrWrongPurpose)
             ));
         }
@@ -720,6 +766,8 @@ mod windows_store {
         }
     }
 }
+#[cfg(windows)]
+pub(crate) use windows_store::ensure_system;
 #[cfg(windows)]
 pub use windows_store::{
     provision_directory, validate_directory, validate_inheritable_directory, ProtectedStore,

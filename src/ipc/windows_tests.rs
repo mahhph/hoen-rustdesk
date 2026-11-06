@@ -135,3 +135,70 @@ async fn windows_ipc_allows_client_communication() {
     .await
     .expect("Windows IPC client communication test timed out");
 }
+
+#[cfg(feature = "hoen-mailbox")]
+#[tokio::test]
+async fn service_pipe_checks_actual_peer_and_rejects_oversized_frame() {
+    timeout(TEST_TIMEOUT, async {
+        let (path, mut incoming) = listener(super::listener_security_attributes().unwrap());
+        let client = super::open_pipe(&path).unwrap();
+        let server = incoming.next().await.unwrap().unwrap();
+        let mut server = crate::ipc::Connection::new_bounded(server, 128);
+        let expected_session = crate::platform::windows::get_current_process_session_id();
+        let (allowed, pid, session, is_system) =
+            server.service_authorization_status_for_session(expected_session);
+        assert_eq!(pid, Some(std::process::id()));
+        assert_eq!(session, expected_session);
+        assert!(allowed);
+        crate::ipc::ensure_peer_executable_matches_current_by_pid_opt(pid, crate::POSTFIX_SERVICE)
+            .unwrap();
+        assert!(
+            crate::ipc::ensure_peer_executable_matches_current_by_pid_opt(
+                None,
+                crate::POSTFIX_SERVICE
+            )
+            .is_err()
+        );
+        if is_system == Some(false) {
+            assert!(!server.service_authorization_status_for_session(None).0);
+            let different_session = expected_session.unwrap().wrapping_add(1);
+            assert!(
+                !server
+                    .service_authorization_status_for_session(Some(different_session))
+                    .0
+            );
+        }
+
+        let mut client = crate::ipc::ConnectionTmpl::new(client);
+        client.send_raw(vec![0u8; 129].into()).await.unwrap();
+        assert!(
+            server.next_raw().await.is_err(),
+            "frame cap must reject before decoding"
+        );
+    })
+    .await
+    .expect("service pipe authorization and frame test timed out");
+}
+
+#[cfg(feature = "hoen-mailbox")]
+#[test]
+fn service_pipe_executable_check_rejects_other_local_program() {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("cmd.exe")
+        .args(["/D", "/C", "pause"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let result = crate::ipc::ensure_peer_executable_matches_current_by_pid_opt(
+        Some(child.id()),
+        crate::POSTFIX_SERVICE,
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        result.is_err(),
+        "a different executable must not use service IPC"
+    );
+}

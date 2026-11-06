@@ -66,6 +66,23 @@ pub struct MailboxDelivery {
 }
 impl MailboxDelivery {
     pub fn new(base_url: &str, root_pem: &[u8], token: ApiToken) -> Result<Self, DeliveryError> {
+        Self::new_inner(base_url, root_pem, token, None)
+    }
+    /// Require the exact SHA-256 leaf certificate pin in addition to normal TLS verification.
+    pub fn new_pinned(
+        base_url: &str,
+        root_pem: &[u8],
+        token: ApiToken,
+        leaf_sha256: [u8; 32],
+    ) -> Result<Self, DeliveryError> {
+        Self::new_inner(base_url, root_pem, token, Some(leaf_sha256))
+    }
+    fn new_inner(
+        base_url: &str,
+        root_pem: &[u8],
+        token: ApiToken,
+        leaf_sha256: Option<[u8; 32]>,
+    ) -> Result<Self, DeliveryError> {
         let base = Url::parse(base_url).map_err(|_| DeliveryError::InvalidConfiguration)?;
         if base.scheme() != "https"
             || base.host_str().is_none()
@@ -79,14 +96,21 @@ impl MailboxDelivery {
         }
         let certificate =
             Certificate::from_pem(root_pem).map_err(|_| DeliveryError::InvalidConfiguration)?;
-        let client = Client::builder()
+        let builder = Client::builder()
             .use_rustls_tls()
             .tls_built_in_root_certs(false)
-            .add_root_certificate(certificate)
             .redirect(Policy::none())
             .no_proxy()
             .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT);
+        let builder = match leaf_sha256 {
+            Some(pin) => builder.use_preconfigured_tls(
+                crate::tls_pin::pinned_config(root_pem, pin)
+                    .map_err(|_| DeliveryError::InvalidConfiguration)?,
+            ),
+            None => builder.add_root_certificate(certificate),
+        };
+        let client = builder
             .build()
             .map_err(|_| DeliveryError::InvalidConfiguration)?;
         Ok(Self {
@@ -265,15 +289,21 @@ mod tests {
             Err(DeliveryError::InvalidConfiguration)
         ));
     }
-    fn mock_tls(body: Vec<u8>) -> (u16, Vec<u8>, std::thread::JoinHandle<()>) {
+    fn mock_tls(body: Vec<u8>) -> (u16, Vec<u8>, std::thread::JoinHandle<Vec<u8>>) {
         use std::{io::Write, net::TcpListener, sync::Arc};
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-        let pem = cert.serialize_pem().unwrap().into_bytes();
+        use base64::Engine as _;
+        let der = cert.serialize_der().unwrap();
+        let pem = format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            base64::engine::general_purpose::STANDARD.encode(&der)
+        )
+        .into_bytes();
         let tls = rustls::ServerConfig::builder()
             .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(
-                vec![rustls::Certificate(cert.serialize_der().unwrap())],
+                vec![rustls::Certificate(der)],
                 rustls::PrivateKey(cert.serialize_private_key_der()),
             )
             .unwrap();
@@ -293,12 +323,12 @@ mod tests {
             loop {
                 let mut chunk = [0; 4096];
                 let n = match stream.read(&mut chunk) {
-                    Ok(0) | Err(_) => return,
+                    Ok(0) | Err(_) => return request,
                     Ok(n) => n,
                 };
                 request.extend_from_slice(&chunk[..n]);
                 if request.len() > 8192 {
-                    return;
+                    return request;
                 }
                 if let Some(pos) = request.windows(4).position(|x| x == b"\r\n\r\n") {
                     let headers = String::from_utf8_lossy(&request[..pos]);
@@ -319,8 +349,60 @@ mod tests {
             let _ = stream.write_all(header.as_bytes());
             let _ = stream.write_all(&body);
             let _ = stream.flush();
+            request
         });
         (port, pem, thread)
+    }
+    #[test]
+    fn pinned_tls_requires_exact_leaf_and_hostname_before_sending_authorization() {
+        use sha2::{Digest, Sha256};
+        for mode in ["correct", "wrong-pin", "wrong-name", "wrong-ca"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut outbox = Outbox::open(&dir.path().join("outbox.db"), 4).unwrap();
+            let event = Event::create(MailboxIdentity::new("viewer-test").unwrap());
+            outbox.enqueue(&event).unwrap();
+            let (port, pem, server) = mock_tls(response(event.session_id(), false));
+            let der = rustls_pemfile::certs(&mut &pem[..]).unwrap().remove(0);
+            let mut pin: [u8; 32] = Sha256::digest(&der).into();
+            if mode == "wrong-pin" {
+                pin[0] ^= 1;
+            }
+            let host = if mode == "wrong-name" {
+                "127.0.0.1"
+            } else {
+                "localhost"
+            };
+            let root = if mode == "wrong-ca" {
+                rcgen::generate_simple_self_signed(vec!["localhost".into()])
+                    .unwrap()
+                    .serialize_pem()
+                    .unwrap()
+                    .into_bytes()
+            } else {
+                pem.clone()
+            };
+            let client = MailboxDelivery::new_pinned(
+                &format!("https://{host}:{port}"),
+                &root,
+                ApiToken::new("a".repeat(43)).unwrap(),
+                pin,
+            )
+            .unwrap();
+            let result = client.deliver_next(&mut outbox, event.session_id());
+            let received = server.join().unwrap();
+            if mode == "correct" {
+                assert!(result.unwrap());
+                assert!(!received.is_empty());
+                assert_eq!(outbox.pending_count().unwrap(), 0);
+            } else {
+                assert!(result.is_err());
+                assert!(
+                    received.is_empty(),
+                    "TLS failure must precede any HTTP request"
+                );
+                assert_eq!(outbox.pending_count().unwrap(), 1);
+            }
+        }
     }
     #[test]
     fn local_tls_requires_matching_name_and_acknowledges_only_correlated_response() {

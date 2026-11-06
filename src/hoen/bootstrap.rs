@@ -2,7 +2,8 @@
 use hbb_common::config;
 use std::sync::OnceLock;
 
-const NAME: &str = "HoenRemote";
+const NAME: &str = "Remote Desktop Client";
+pub(crate) const SERVICE_NAME: &str = "RemoteDesktopService";
 static SELECTED: OnceLock<bool> = OnceLock::new();
 
 fn select(current: &str) -> Option<&'static str> {
@@ -55,8 +56,8 @@ mod tests {
     use super::*;
     #[test]
     fn namespace_is_fixed_and_rejects_prior_custom_names() {
-        assert_eq!(select("RustDesk"), Some("HoenRemote"));
-        assert_eq!(select("HoenRemote"), Some("HoenRemote"));
+        assert_eq!(select("RustDesk"), Some("Remote Desktop Client"));
+        assert_eq!(select("Remote Desktop Client"), Some("Remote Desktop Client"));
         assert_eq!(select("OtherProduct"), None);
     }
     #[test]

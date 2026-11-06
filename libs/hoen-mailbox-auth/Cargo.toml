@@ -18,7 +18,8 @@ url = "=2.5.2"
 zeroize = "=1.8.1"
 ed25519-dalek = { version = "=2.1.1", default-features = false, features = ["std"] }
 sha2 = "=0.10.8"
+rustls = { version = "=0.21.12", features = ["dangerous_configuration"] }
+rustls-pemfile = "=1.0.4"
 
 [dev-dependencies]
 rcgen = "=0.12.1"
-rustls = "=0.21.12"

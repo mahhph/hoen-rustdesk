@@ -1,5 +1,14 @@
 # macOS host and viewer integration
 
+Current seq210 integration supersedes earlier network policy and readiness notes below.
+The native TCP transport checks its configured local binding; adapter/network IDs,
+SSID, interface type, OS category and peer route are not authorization checks.
+Mac retains Keychain enrollment and the development app namespace, but no longer
+queries Wi-Fi identifiers or automatically selects a pinned-network address.
+Network notifications may terminate a session; reconnection requires fresh proof.
+The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+Earlier seq191/193 admission descriptions are historical and superseded.
+
 Status: source and build review only. This branch is not an integrated host,
 and no service, privacy setting, listener, or firewall setting has been installed.
 The earlier custom Hoen Remote prototype is preserved in the mailbox repository;

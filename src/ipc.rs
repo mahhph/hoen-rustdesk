@@ -340,6 +340,14 @@ pub enum SwitchSidesUuidAction {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "t", content = "c")]
 pub enum Data {
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenLookupRequest(crate::hoen::local_proof::LookupRequest),
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenLookupResponse(Option<crate::hoen::local_proof::LookupResponse>),
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenProofRequest(crate::hoen::local_proof::ProofRequest),
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenProofResponse(Option<crate::hoen::local_proof::ProofResponse>),
     Login {
         id: i32,
         is_file_transfer: bool,
@@ -1686,6 +1694,18 @@ where
         Self {
             inner: Framed::new(conn, BytesCodec::new()),
         }
+    }
+
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    pub(crate) fn new_bounded(conn: T, max_length: usize) -> Self {
+        let mut codec = BytesCodec::new();
+        codec.set_max_packet_length(max_length);
+        Self { inner: Framed::new(conn, codec) }
+    }
+
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    pub(crate) fn set_max_packet_length(&mut self, max_length: usize) {
+        self.inner.codec_mut().set_max_packet_length(max_length);
     }
 
     pub async fn send(&mut self, data: &Data) -> ResultType<()> {

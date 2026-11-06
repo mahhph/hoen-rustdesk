@@ -10,22 +10,6 @@ pub(crate) fn command() -> Option<ResultType<()>> {
     use std::io::Read;
     let mut args = std::env::args().skip(1);
     let command = args.next();
-    #[cfg(target_os = "macos")]
-    if command.as_deref() == Some("--hoen-request-wifi-access") {
-        return Some((|| {
-            if args.next().is_some() { bail!("Wi-Fi setup accepts no arguments"); }
-            super::macos_network::request_wifi_access()
-        })());
-    }
-    #[cfg(target_os = "macos")]
-    if command.as_deref() == Some("--hoen-network-identifiers") {
-        return Some((|| {
-            if args.next().is_some() { bail!("network inspection accepts no arguments"); }
-            let network = super::macos_network::observe()?;
-            println!("adapter_id={:032x}\nnetwork_id={:032x}\nlocal_address={}", network.adapter_id, network.network_id, network.address);
-            Ok(())
-        })());
-    }
     let purpose = match command.as_deref() {
         Some("--hoen-import-viewer") => Purpose::Viewer,
         Some("--hoen-import-host") => Purpose::HostService,

@@ -706,6 +706,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         base::platform::windows::start_cpu_performance_monitor();
     });
 
+    // In mailbox mode only the service's server process may own host IPC.
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    let is_server = is_server && crate::is_server();
     if is_server {
         #[cfg(windows)]
         if !crate::is_server() {
@@ -719,6 +722,7 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             std::thread::spawn(move || {
                 if let Err(err) = crate::ipc::start("") {
                     log::error!("Failed to start ipc: {}", err);
+                    #[cfg(not(all(windows, feature = "hoen-mailbox")))]
                     if crate::is_server() {
                         log::error!("ipc is occupied by another process, try kill it");
                         std::thread::spawn(stop_main_window_process).join().ok();
@@ -793,13 +797,22 @@ pub async fn start_server(is_server: bool, no_server: bool) {
                 crate::ipc::client_get_hwcodec_config_thread(0);
             }
             Err(err) => {
-                log::info!("server not started: {err:?}, no_server: {no_server}");
-                if no_server {
+                #[cfg(all(windows, feature = "hoen-mailbox"))]
+                {
+                    log::trace!("Waiting for mailbox service IPC: {err:?}, no_server: {no_server}");
                     hbb_common::sleep(1.0).await;
                     std::thread::spawn(|| start_server(false, true));
-                } else {
-                    log::info!("try start server");
-                    std::thread::spawn(|| start_server(true, false));
+                }
+                #[cfg(not(all(windows, feature = "hoen-mailbox")))]
+                {
+                    log::info!("server not started: {err:?}, no_server: {no_server}");
+                    if no_server {
+                        hbb_common::sleep(1.0).await;
+                        std::thread::spawn(|| start_server(false, true));
+                    } else {
+                        log::info!("try start server");
+                        std::thread::spawn(|| start_server(true, false));
+                    }
                 }
             }
         }

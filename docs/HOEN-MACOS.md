@@ -1,5 +1,14 @@
 # macOS mailbox host development
 
+Current seq210 integration supersedes earlier network policy and readiness notes below.
+The native TCP transport checks its configured local binding; adapter/network IDs,
+SSID, interface type, OS category and peer route are not authorization checks.
+Mac retains Keychain enrollment and the development app namespace, but no longer
+queries Wi-Fi identifiers or automatically selects a pinned-network address.
+Network notifications may terminate a session; reconnection requires fresh proof.
+The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+Earlier seq191/193 admission descriptions are historical and superseded.
+
 The development build uses the `hoen-mac-dev` feature and separate application, Keychain, and history names. The production mailbox feature keeps network admission disabled until the real-device trial has passed. Stock RustDesk installation, removal, and update commands are disabled in mailbox mode pending a separate installer. The application bundle identifier and launch-agent isolation still require verification before running alongside an existing installation.
 
 With Rust, Flutter, CocoaPods and the native dependencies already configured, `python3 scripts/build-hoen-mac-dev.py` builds a separate development bundle and signs it locally for testing. It preserves the existing Xcode project contents, saves recovery copies under the build directory, and refuses to overwrite a project file changed during the build. This ad-hoc signature is not a production signing identity.

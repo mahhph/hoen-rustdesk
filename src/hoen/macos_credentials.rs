@@ -3,7 +3,10 @@
 use super::{CredentialStore, Purpose, Secret, StoreError};
 use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
 
+#[cfg(not(feature = "hoen-mac-dev"))]
 const SERVICE: &str = "com.hoensolutions.remote.enrollment.v1";
+#[cfg(feature = "hoen-mac-dev")]
+const SERVICE: &str = "com.hoensolutions.remote.development.enrollment.v1";
 const ITEM_NOT_FOUND: i32 = -25300;
 
 /// Separate entries for host and viewer. Keychain ACLs identify the executable, not its role:

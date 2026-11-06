@@ -116,7 +116,12 @@ pub(super) fn history(home: &Path) -> ResultType<PathBuf> {
     inspect(&library, uid, false)?;
     let support = library.join("Application Support");
     inspect(&support, uid, false)?;
-    let app = create_private(&support, "HoenRemote", uid)?;
+    let app_name = if cfg!(feature = "hoen-mac-dev") {
+        "HoenRemoteDev"
+    } else {
+        "HoenRemote"
+    };
+    let app = create_private(&support, app_name, uid)?;
     let host = create_private(&app, "host", uid)?;
     Ok(create_private(&host, "history", uid)?.join("outbox.sqlite"))
 }

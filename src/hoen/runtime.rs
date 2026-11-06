@@ -216,8 +216,19 @@ fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
 
 async fn initialize(purpose: Purpose) -> ResultType<Arc<Runtime>> {
     let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
+    #[cfg(all(target_os = "macos", feature = "hoen-mac-dev"))]
+    let mut enrollment = enrollment;
     if purpose == Purpose::HostService && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
+    }
+    #[cfg(all(target_os = "macos", feature = "hoen-mac-dev"))]
+    {
+        let adapter_id = opaque_id(&enrollment.adapter_id)?;
+        let network_id = opaque_id(&enrollment.network_id)?;
+        let current =
+            spawn_blocking(move || super::macos_network::approved_address(adapter_id, network_id))
+                .await??;
+        enrollment.local_address = IpAddr::V4(current);
     }
     let policy = network::Policy {
         adapter_id: opaque_id(&enrollment.adapter_id)?,

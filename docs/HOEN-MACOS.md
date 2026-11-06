@@ -22,13 +22,29 @@ checks, and pass interactive capture/input permission and live-session tests.
 This is a logged-in-user development path, not an unattended login-window
 service or a production installer.
 
+The logged-in Mac app also keeps its host controller available while hosting
+is disabled, so enabling the service later does not require restarting the
+app. If host startup fails, the controller logs the failure and stops rather
+than repeatedly requesting Keychain access. A restart is currently required
+after correcting that failure. This behavior does not establish login-time
+startup or automatic recovery from network changes.
+
+To inspect the app's macOS permissions without requesting either permission,
+run its signed executable with `--hoen-host-permissions` from the intended
+logged-in account. It reports Screen Recording and Accessibility separately,
+and exits unsuccessfully if either is missing. Grant permissions to the same
+app in System Settings before a live host test. This check does not start a
+listener, access Keychain, or establish that capture and input work.
+
 Current seq210 integration supersedes earlier network policy and readiness notes below.
 The native TCP transport checks its configured local binding; adapter/network IDs,
 SSID, interface type, OS category and peer route are not authorization checks.
 Mac retains Keychain enrollment and the development app namespace, but no longer
 queries Wi-Fi identifiers or automatically selects a pinned-network address.
 Network notifications may terminate a session; reconnection requires fresh proof.
-The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+At startup the app resolves the current local address used to reach the mailbox;
+after a successful bind the host registers that address. A running host does not
+yet reinitialize itself after a network change. Relay is unimplemented.
 Earlier seq191/193 admission descriptions are historical and superseded.
 
 The development build uses the `hoen-mac-dev` feature and separate application, Keychain, and history names. The production mailbox feature keeps network admission disabled until the real-device trial has passed. Stock RustDesk installation, removal, and update commands are disabled in mailbox mode pending a separate installer. The application bundle identifier and launch-agent isolation still require verification before running alongside an existing installation.
@@ -37,7 +53,9 @@ With Rust, Flutter, CocoaPods and the native dependencies already configured, `p
 
 The mailbox-enabled Mac build uses a logged-in user's Keychain for enrollment and a private user-owned directory for the history outbox. The login-window/root context is not enrolled by this implementation. Host and viewer entries have distinct names, but Keychain access control identifies the executable, so those names are not an isolation boundary between processes running as the same user and executable.
 
-The host checks an explicitly enrolled Wi-Fi interface and access point, a private IPv4 address, and a direct route to each peer. It obtains the current address again at startup and advertises it only after the listener binds. A changed access point identity requires renewed approval. SSID and BSSID matching is not cryptographic authentication; the mailbox grant and authenticated host handshake remain required. Missing permission, identity, route, or network data fails closed.
+Historical network-policy notes below describe the superseded Wi-Fi trial, not the
+current host's admission policy. The mailbox grant and authenticated host
+handshake remain required; missing identity or trust data fails closed.
 
 The following commands are development setup operations for the signed application executable inside the app bundle. Run them as the intended logged-in user, not as root:
 

@@ -58,6 +58,10 @@ queries Wi-Fi identifiers or automatically selects a pinned-network address.
 Actual link, address and route notifications may terminate a session; reconnection
 requires fresh proof. Wi-Fi radio and signal-quality telemetry alone does not end
 a session or stop the listener.
+On November 6, the updated signed host remained listening across several observed
+`LinkQuality` notifications that had previously triggered shutdown. Its startup
+retry and event filtering also passed automated tests. This observation does not
+establish recovery after an actual address change or an unattended login.
 At startup the app resolves the current local address used to reach the mailbox;
 after a successful bind the host registers that address. A running host does not
 yet reinitialize itself after a network change. Relay is unimplemented.

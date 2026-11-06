@@ -373,6 +373,25 @@ pub(crate) fn import_enrollment(
     store.write_new(secret).map_err(|_| anyhow!("cannot create protected mailbox enrollment; an existing enrollment is not replaced"))
 }
 
+#[cfg(target_os = "macos")]
+fn host_secret_from_viewer(secret: &super::credentials::Secret) -> ResultType<super::credentials::Secret> {
+    let mut enrollment = parse(secret.expose())?;
+    enrollment.hosting_enabled = true;
+    super::credentials::Secret::new(serde_json::to_vec(&enrollment)?)
+        .map_err(|_| anyhow!("cannot prepare protected host enrollment"))
+}
+
+/// Reuse the viewer's existing identity and signing key; never replace a host entry.
+#[cfg(target_os = "macos")]
+pub(crate) fn provision_host_from_viewer() -> ResultType<()> {
+    use super::credentials::{CredentialStore, MacStore};
+    let viewer = MacStore::for_user(Purpose::Viewer)
+        .and_then(|store| store.read())
+        .map_err(|_| anyhow!("protected viewer enrollment unavailable"))?;
+    let host = host_secret_from_viewer(&viewer)?;
+    import_enrollment(Purpose::HostService, &host)
+}
+
 #[cfg(not(any(windows, target_os = "macos")))]
 fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
     bail!("protected mailbox enrollment is not implemented on this platform");
@@ -503,6 +522,25 @@ pub(crate) async fn machine_for_service() -> ResultType<Arc<Runtime>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn host_enrollment_reuses_viewer_identity_without_changing_the_viewer() {
+        let viewer = super::super::credentials::Secret::new(
+            serde_json::to_vec(&fixture()).unwrap()
+        ).unwrap();
+        let before = parse(viewer.expose()).unwrap();
+        assert!(!before.hosting_enabled);
+        let host = host_secret_from_viewer(&viewer).unwrap();
+        let after = parse(host.expose()).unwrap();
+        assert_eq!(after.identity, before.identity);
+        assert_eq!(after.signing_seed, before.signing_seed);
+        assert_eq!(after.access_token, before.access_token);
+        assert_eq!(after.mailbox_url, before.mailbox_url);
+        assert_eq!(after.mailbox_leaf_fingerprint, before.mailbox_leaf_fingerprint);
+        assert!(after.hosting_enabled);
+        assert!(!parse(viewer.expose()).unwrap().hosting_enabled);
+    }
 
     #[test]
     fn startup_resolves_current_address_instead_of_using_enrollment_address() {

@@ -1,5 +1,15 @@
 # macOS mailbox host development
 
+## Mac viewer test (2026-11-06)
+
+The user tested the development Mac client against both Area 51 and Lenovo and
+reported that both worked. Before the final monitor/retry fix, a connection to
+Area 51 displayed the desktop but repeatedly disconnected; after the fix the
+user reported success against both machines. The current development viewer
+uses the existing `mac` mailbox identity with a Keychain-protected signing key.
+This user-reported result is viewer evidence; it does not establish Mac host,
+unattended service, clipboard-format, or session-history acceptance.
+
 ## Mac host development: shared device identity
 
 The development client can provision a separate host Keychain entry from its

@@ -99,13 +99,13 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
+          constraints: const BoxConstraints(maxWidth: 480),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Remote Desktop Client',
-                style: Theme.of(context).textTheme.headlineMedium),
+                style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
             const Text('Select a registered machine with hosting enabled.'),
             if (_identity != null) ...[

@@ -23,6 +23,7 @@ foreach($size in @(16,24,32,48,64,128,256)) {
  $stream=[IO.MemoryStream]::new()
  $bmp.Save($stream,[Drawing.Imaging.ImageFormat]::Png)
  $frames+=,@{size=$size;bytes=$stream.ToArray()}
+ if($size -eq 256){$bmp.Save((Join-Path $PSScriptRoot '..\flutter\assets\remote_desktop.png'),[Drawing.Imaging.ImageFormat]::Png)}
  if($size -eq 256 -and $PreviewPath){$bmp.Save($PreviewPath,[Drawing.Imaging.ImageFormat]::Png)}
  $stream.Dispose();$g.Dispose();$bmp.Dispose();$shape.Dispose();$pen.Dispose();$navy.Dispose();$teal.Dispose();$white.Dispose()
 }

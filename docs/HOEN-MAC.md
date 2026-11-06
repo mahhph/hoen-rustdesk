@@ -151,3 +151,35 @@ At the same checkpoint the standalone mailbox authentication helper passed
 connection, implement the Mac protected credential store or network provider,
 or validate the native UI/host behavior. Existing per-machine build-only changes
 were preserved outside the commits; no host was installed.
+
+
+### macOS monitor startup investigation (mailbox seq217, 2026-11-06)
+
+On macOS 27.2 (26B123), arm64, uid 501, inside the local Codex
+workspace-write execution sandbox, the isolated harness compiling the actual
+`network_monitor.rs` and `macos_network_monitor.rs` ran five tests: four passed;
+`starts_and_shuts_down` failed with `MonitorError::Unavailable`.
+A direct native-call probe in the same execution context identified the first
+startup failure: `socket(17, 3, 0)` (`PF_ROUTE`, `SOCK_RAW`, `AF_UNSPEC`)
+returned -1 with errno 1 (`EPERM`, Operation not permitted). `Route::open`
+therefore exits before its `fcntl` calls and before any dynamic-store
+subscription or run-loop-source setup. A separate `SCDynamicStoreCreate`
+probe succeeded with `SCError() == 0`; notification subscription and source
+creation are not established by that probe.
+
+This establishes the failing syscall in the agent execution environment. It
+does not establish whether the restriction also applies to the intended signed
+application or an ordinary unsandboxed user shell. No normal-user-session
+startup result is available yet, so runtime readiness remains unverified.
+Do not infer that the connected network type caused the error or change
+network settings to address it. The monitor provides invalidation, not network
+authorization. Retain the fail-closed error rather than bypass routing events.
+
+Remaining verification: run the existing `starts_and_shuts_down` test in an
+ordinary user execution context, then the integrated native feature suite once
+the previously reported native dependency build blockers are resolved. If
+`EPERM` persists there, inspect that process's sandbox/entitlement policy before
+choosing a narrowly scoped implementation or packaging fix. This investigation
+changes documentation only; no runtime path, network settings, entitlements,
+service, or watcher configuration changed. Harness log:
+`/private/tmp/hoen-seq217-monitor.log`.

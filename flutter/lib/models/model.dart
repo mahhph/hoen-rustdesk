@@ -39,6 +39,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:vector_math/vector_math.dart' show Vector2;
 
 import '../common.dart';
+import '../common/hoen_retry_policy.dart';
 import '../utils/image.dart' as img;
 import '../common/widgets/dialog.dart';
 import 'input_model.dart';
@@ -972,6 +973,12 @@ class FfiModel with ChangeNotifier {
       if (!hasRetry) {
         hasRetry = shouldAutoRetryOnOffline(type, title, text);
       }
+      hasRetry = shouldRetryConnectionError(
+        retryRequested: hasRetry,
+        isMac: isMacOS,
+        mailboxMode: isMacOS && bind.mainGetOptionSync(key: 'hoen-mailbox-mode') == 'Y',
+        title: title,
+      );
       showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
     }
   }

@@ -265,6 +265,23 @@ pub struct MailboxClient {
 }
 impl MailboxClient {
     pub fn new(base_url: &str, root_pem: &[u8], token: AccessToken) -> Result<Self, Error> {
+        Self::new_inner(base_url, root_pem, token, None)
+    }
+    /// Require the exact SHA-256 leaf certificate pin in addition to normal TLS verification.
+    pub fn new_pinned(
+        base_url: &str,
+        root_pem: &[u8],
+        token: AccessToken,
+        leaf_sha256: [u8; 32],
+    ) -> Result<Self, Error> {
+        Self::new_inner(base_url, root_pem, token, Some(leaf_sha256))
+    }
+    fn new_inner(
+        base_url: &str,
+        root_pem: &[u8],
+        token: AccessToken,
+        leaf_sha256: Option<[u8; 32]>,
+    ) -> Result<Self, Error> {
         let base = Url::parse(base_url).map_err(|_| Error::InvalidConfiguration)?;
         if base.scheme() != "https"
             || base.host_str().is_none()
@@ -277,16 +294,21 @@ impl MailboxClient {
             return Err(Error::InvalidConfiguration);
         }
         let cert = Certificate::from_pem(root_pem).map_err(|_| Error::InvalidConfiguration)?;
-        let client = Client::builder()
+        let builder = Client::builder()
             .use_rustls_tls()
             .tls_built_in_root_certs(false)
-            .add_root_certificate(cert)
             .no_proxy()
             .redirect(Policy::none())
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|_| Error::InvalidConfiguration)?;
+            .timeout(Duration::from_secs(15));
+        let builder = match leaf_sha256 {
+            Some(pin) => builder.use_preconfigured_tls(
+                crate::tls_pin::pinned_config(root_pem, pin)
+                    .map_err(|_| Error::InvalidConfiguration)?,
+            ),
+            None => builder.add_root_certificate(cert),
+        };
+        let client = builder.build().map_err(|_| Error::InvalidConfiguration)?;
         Ok(Self {
             client,
             base,
@@ -423,12 +445,17 @@ mod tests {
     // Local TLS only: the server returns a single explicitly supplied response.
     fn mock(status: u16, json: Vec<u8>) -> (u16, Vec<u8>, thread::JoinHandle<Vec<u8>>) {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-        let pem = cert.serialize_pem().unwrap().into_bytes();
+        let der = cert.serialize_der().unwrap();
+        let pem = format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            base64::engine::general_purpose::STANDARD.encode(&der)
+        )
+        .into_bytes();
         let tls = rustls::ServerConfig::builder()
             .with_safe_defaults()
             .with_no_client_auth()
             .with_single_cert(
-                vec![rustls::Certificate(cert.serialize_der().unwrap())],
+                vec![rustls::Certificate(der)],
                 rustls::PrivateKey(cert.serialize_private_key_der()),
             )
             .unwrap();
@@ -491,6 +518,51 @@ mod tests {
             .unwrap(),
             thread,
         )
+    }
+    #[test]
+    fn pinned_tls_requires_exact_leaf_and_hostname_before_sending_authorization() {
+        use sha2::{Digest, Sha256};
+        for mode in ["correct", "wrong-pin", "wrong-name", "wrong-ca"] {
+            let (port, pem, server) = mock(200, br#"{"machines":[]}"#.to_vec());
+            let der = rustls_pemfile::certs(&mut &pem[..]).unwrap().remove(0);
+            let mut pin: [u8; 32] = Sha256::digest(&der).into();
+            if mode == "wrong-pin" {
+                pin[0] ^= 1;
+            }
+            let host = if mode == "wrong-name" {
+                "127.0.0.1"
+            } else {
+                "localhost"
+            };
+            let root = if mode == "wrong-ca" {
+                rcgen::generate_simple_self_signed(vec!["localhost".into()])
+                    .unwrap()
+                    .serialize_pem()
+                    .unwrap()
+                    .into_bytes()
+            } else {
+                pem.clone()
+            };
+            let client = MailboxClient::new_pinned(
+                &format!("https://{host}:{port}"),
+                &root,
+                AccessToken::from_encoded(&URL_SAFE_NO_PAD.encode([3; 32])).unwrap(),
+                pin,
+            )
+            .unwrap();
+            let result = client.list();
+            let received = server.join().unwrap();
+            if mode == "correct" {
+                assert!(result.is_ok());
+                assert!(!received.is_empty());
+            } else {
+                assert!(result.is_err());
+                assert!(
+                    received.is_empty(),
+                    "TLS failure must occur before any HTTP request"
+                );
+            }
+        }
     }
     fn record() -> serde_json::Value {
         serde_json::json!({"identity":"host-one","displayName":"Home Host","endpoint":{"address":"192.168.1.4","port":21118},"hostingEnabled":true,"publicKeyFingerprint":"ab".repeat(32),"updatedAt":"2026-11-05T18:00:00.000Z"})

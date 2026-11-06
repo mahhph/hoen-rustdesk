@@ -381,6 +381,7 @@ jobs:
           FEATURES=$(python3 ./build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }} --print-features)
           cargo test --locked --release --lib --features "$FEATURES"
           cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" hoen
+          cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" ipc::ipc_windows::tests -- --test-threads=1
           # Its Windows tests run nowhere else.
           cargo test --locked --release -p clipboard
 

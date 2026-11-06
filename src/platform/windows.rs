@@ -4235,6 +4235,11 @@ pub fn try_remove_temp_update_files() {
 
 #[inline]
 pub fn try_kill_broker() {
+    // The legacy image name is shared with stock RustDesk; image-wide cleanup
+    // would terminate its privacy broker during this product's service startup.
+    if cfg!(feature = "hoen-mailbox") {
+        return;
+    }
     allow_err!(std::process::Command::new("cmd")
         .arg("/c")
         .arg(&format!(

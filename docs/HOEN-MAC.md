@@ -49,3 +49,55 @@ RustDesk session. A production-signed Mac build, bridge and dependency validatio
 actual capture/input/clipboard behavior, service lifecycle, local-network policy,
 and two-machine tests remain outstanding. Native RustDesk clipboard formats are
 allowed; separate file-transfer sessions remain outside the current scope.
+
+## Native adapter validation at 4095dc5 (mailbox seq165)
+
+The Mac branch fast-forwarded to `4095dc54ac21e7f63f1b9cde7be8d17569416606`.
+Later Windows host/viewer hooks require a separately identified checkpoint.
+The local Podfile minimum is 12.3, matching the ARM64 CI patch and
+ScreenCaptureKit baseline; this only changes macOS dependency resolution.
+
+Portable `cargo +stable test --locked --manifest-path
+libs/hoen-mailbox-auth/Cargo.toml` passed 7 tests (exit 0, 7.85 seconds).
+The corresponding history manifest passed 9 tests (exit 0, 6.93 seconds).
+Compiler: rustc 1.99.1, aarch64 Apple Darwin; this is not Rust 1.81 validation.
+Commands and logs are retained locally under `.hoen-mac-build/seq165/`
+in the parent workspace. Portable tests do not compile the native runtime adapters.
+
+`src/hoen/credentials.rs` exports `ProtectedStore` only on Windows. macOS
+needs a Keychain provider with separate viewer and host/helper identities,
+explicit provisioning/access policy and errors for locked or denied access.
+Do not substitute plaintext config storage. Device private keys and mailbox
+credentials remain local; mailbox identity is cryptographic, not a display name.
+
+`network::verify_binding` and `network::admit_socket` return
+`SnapshotUnavailable` on macOS. Both host and viewer must remain denied until
+an approved macOS interface/network policy, actual local/peer route checks and
+network-change revalidation are implemented. Windows adapter/network GUIDs
+are not an implemented macOS approval identity. Coordinate any shared policy
+contract change before coding it.
+
+The seq159 TLS transition remains preparation only. Strict HTTPS clients need
+an explicitly provisioned trust root and a matching IP/DNS SAN leaf. The old
+SAN-less API certificate cannot be repaired by installing a root. Stage public
+trust and obtain consumer acknowledgments before a coordinated Linux cutover;
+do not modify watcher profiles or rotate live trust as part of desktop builds.
+
+Remaining acceptance includes native adapter compilation, signed app packaging,
+viewer and host flows, denied/revoked capture/input permissions, native clipboard
+formats, reconnect/lock/login behavior and metadata-only history recovery.
+Clipboard payloads must never enter history. No host installation or unattended
+readiness follows from these test results.
+
+Full app probes used `cargo +stable check --locked --features
+flutter,hoen-mailbox --lib` (exit 101, 142.48 seconds) and feature-off
+`cargo +stable check --locked --features flutter --lib` (exit 101,
+1.31 seconds). Feature-on failed in magnum-opus build.rs:71, missing
+`/opt/homebrew/Cellar/opus`; feature-off reported the same and
+scrap build.rs:89, missing `/opt/homebrew/Cellar/libyuv`. These were
+baseline environment probes without the isolated vcpkg environment; its
+arm64 installed libraries are also absent. Supply native dependencies before
+repeating the native adapter build. No app or package artifact was produced.
+Ruby Podfile syntax validation and `git diff --check` passed.
+Regression surface: only the Podfile deployment minimum changes existing
+macOS build behavior; shared runtime/protocol and feature-off code are untouched.

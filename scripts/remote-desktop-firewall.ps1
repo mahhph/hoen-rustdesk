@@ -75,12 +75,27 @@ function Invoke-FirewallPolicy([string]$Operation,[string]$Program,[int]$Port) {
         if($Operation -eq 'Validate'){throw 'Required local firewall rule is absent.'}
         if($null -ne (Get-RuleSnapshot 'ActiveStore')){throw 'A different active rule uses the reserved identity.'}
         New-NetFirewallRule -PolicyStore PersistentStore -Name $ruleName -DisplayName 'Remote Desktop Service - Inbound' -Description $ruleDescription -Enabled True -Direction Inbound -Action Allow -Profile Any -EdgeTraversalPolicy Block -Program $Program -Protocol TCP -LocalPort $Port -RemotePort Any -LocalAddress Any -RemoteAddress Any -InterfaceAlias Any -InterfaceType Any -Service Any -ErrorAction Stop | Out-Null
-        $local=Get-RuleSnapshot 'PersistentStore'
-        if(-not (Test-OwnedRule $local $Program $Port)){throw 'Created rule could not be verified; inspect the local policy before retrying.'}
         $created=$true
     } else { $created=$false }
-    $active=Get-RuleSnapshot 'ActiveStore'
-    if(-not (Test-OwnedRule $active $Program $Port)){throw 'Local rule is not active as expected; check applied firewall policy.'}
+    try {
+        if($created){
+            $local=Get-RuleSnapshot 'PersistentStore'
+            if(-not (Test-OwnedRule $local $Program $Port)){throw 'Created rule could not be verified.'}
+        }
+        $active=Get-RuleSnapshot 'ActiveStore'
+        if(-not (Test-OwnedRule $active $Program $Port)){throw 'Local rule is not active as expected; check applied firewall policy.'}
+    } catch {
+        $original=$_
+        if($created){
+            try {
+                $current=Get-RuleSnapshot 'PersistentStore'
+                if(-not (Test-OwnedRule $current $Program $Port)){throw 'Created rule no longer matches; refusing cleanup.'}
+                Remove-NetFirewallRule -InputObject $current.Rule -ErrorAction Stop
+                if($null -ne (Get-RuleSnapshot 'PersistentStore')){throw 'Rule cleanup could not be verified.'}
+            } catch { throw "Firewall setup failed and cleanup requires review: $($_.Exception.Message). Original: $($original.Exception.Message)" }
+        }
+        throw $original
+    }
     if($created){return 'created'}
     return 'verified'
 }

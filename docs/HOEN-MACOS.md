@@ -30,12 +30,13 @@ service or a production installer.
 
 The logged-in Mac app also keeps its host controller available while hosting
 is disabled, so enabling the service later does not require restarting the
-app. After the protected host runtime initializes, the controller retries a
-failed listener every 15 seconds using the same runtime and history worker.
-An initialization failure stops the controller rather than repeatedly requesting
-Keychain access; restart the app after correcting that failure. A retry uses the
-address resolved when the runtime initialized; a changed address requires an app
-restart. This behavior does not establish login-time startup.
+app. After loading protected enrollment once, it retries temporary mailbox and
+network initialization failures without repeatedly requesting Keychain access.
+An enrollment or Keychain read failure still requires an app restart after it is
+corrected. After initialization, a failed listener is retried every 15 seconds
+using the same runtime and history worker. A retry uses the address resolved when
+the runtime initialized; a changed address requires an app restart. This behavior
+does not establish login-time startup.
 The Mac host acquires the app's local control socket before starting hosting;
 if another instance owns it, the new host stops without closing that instance.
 
@@ -54,7 +55,9 @@ The native TCP transport checks its configured local binding; adapter/network ID
 SSID, interface type, OS category and peer route are not authorization checks.
 Mac retains Keychain enrollment and the development app namespace, but no longer
 queries Wi-Fi identifiers or automatically selects a pinned-network address.
-Network notifications may terminate a session; reconnection requires fresh proof.
+Actual link, address and route notifications may terminate a session; reconnection
+requires fresh proof. Wi-Fi radio and signal-quality telemetry alone does not end
+a session or stop the listener.
 At startup the app resolves the current local address used to reach the mailbox;
 after a successful bind the host registers that address. A running host does not
 yet reinitialize itself after a network change. Relay is unimplemented.

@@ -25,10 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check installer, firewall and upgrade guards
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./scripts/test-remote-desktop-service-installer.ps1
-          & ./scripts/test-remote-desktop-firewall.ps1
-          & ./scripts/test-remote-desktop-installer-firewall.ps1
-          & ./scripts/test-remote-desktop-upgrade.ps1
+          $testScripts = @(
+            'test-remote-desktop-service-installer.ps1',
+            'test-remote-desktop-firewall.ps1',
+            'test-remote-desktop-installer-firewall.ps1',
+            'test-remote-desktop-upgrade.ps1'
+          )
+          foreach ($testScript in $testScripts) {
+            & '${{ matrix.shell }}' -NoProfile -ExecutionPolicy Bypass -File "./scripts/$testScript"
+            if ($LASTEXITCODE -ne 0) { throw "$testScript failed with exit code $LASTEXITCODE" }
+          }

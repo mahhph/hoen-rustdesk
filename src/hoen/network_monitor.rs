@@ -88,6 +88,9 @@ impl NetworkMonitor {
                 .await
                 .map_err(|_| MonitorError::Unavailable)?
                 .map_err(|_| MonitorError::Unavailable)?,
+            #[cfg(target_os = "macos")]
+            None => Ok(()),
+            #[cfg(not(target_os = "macos"))]
             None => Err(MonitorError::Unavailable),
         }
     }
@@ -110,7 +113,17 @@ impl Drop for NetworkMonitor {
         }
     }
 }
-#[cfg(not(windows))]
+// macOS sessions use transport EOF/errors and existing session timeouts for liveness.
+// Interface changes are not authorization events; ownership still invalidates the session.
+#[cfg(target_os = "macos")]
+fn start_blocking() -> Result<NetworkMonitor, MonitorError> {
+    Ok(NetworkMonitor {
+        shared: Shared::new(),
+        stop: None,
+        done: None,
+    })
+}
+#[cfg(not(any(windows, target_os = "macos")))]
 fn start_blocking() -> Result<NetworkMonitor, MonitorError> {
     Err(MonitorError::Unsupported)
 }
@@ -474,6 +487,16 @@ mod tests {
         assert!(closed.closed);
         s.invalidate();
         assert_eq!(s.state(), closed);
+    }
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn mac_session_lifecycle_starts_and_shuts_down() {
+        let monitor = NetworkMonitor::start().await.unwrap();
+        let captured = monitor.state();
+        let shared = monitor.shared.clone();
+        assert!(monitor.is_current(captured));
+        monitor.shutdown().await.unwrap();
+        assert!(shared.state().closed);
     }
     #[test]
     fn overflow_closes_instead_of_reusing_a_generation() {

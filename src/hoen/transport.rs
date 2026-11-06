@@ -87,7 +87,7 @@ pub(crate) fn validate_decrypted_frame(bytes: &[u8]) -> ResultType<()> {
 async fn admit(policy: network::Policy, local: SocketAddr, peer: SocketAddr) -> ResultType<()> {
     spawn_blocking(move || network::admit_socket(Some(&policy), local, peer))
         .await?
-        .map_err(|_| anyhow!("connection is outside the approved home network"))
+        .map_err(|_| anyhow!("socket local address does not match configured bind address"))
 }
 
 impl Transport {
@@ -167,7 +167,7 @@ impl Transport {
         Ok((transport, proof))
     }
 
-    /// The caller must also validate the approved address before opening its listener.
+    /// The caller must also validate the selected local address before opening its listener.
     pub async fn accept(
         socket: TcpStream,
         policy: network::Policy,

@@ -1,5 +1,5 @@
-//! Opt-in invalidation monitor. A notification never approves a network: callers must close
-//! existing listeners/sessions and obtain a fresh approved snapshot before reconnecting.
+//! Opt-in connection invalidation monitor. Notifications end connections after a network
+//! change; they do not authorize a network path or peer.
 //! Subscribe before a snapshot, compare the returned state after it, and keep watching afterward.
 use hbb_common::tokio::{
     self,
@@ -332,21 +332,19 @@ mod windows_monitor {
             reg.handles.push(h);
             let mut version = 0;
             h = HANDLE::default();
-            if WlanOpenHandle(2, None, &mut version, &mut h) != ERROR_SUCCESS.0 {
-                return Err(MonitorError::Unavailable);
-            }
-            reg.wlan = Some(h);
-            if WlanRegisterNotification(
-                h,
-                WLAN_NOTIFICATION_SOURCE_ACM | WLAN_NOTIFICATION_SOURCE_MSM,
-                false,
-                Some(wlan_cb),
-                Some(ctx),
-                None,
-                None,
-            ) != ERROR_SUCCESS.0
-            {
-                return Err(MonitorError::Unavailable);
+            if WlanOpenHandle(2, None, &mut version, &mut h) == ERROR_SUCCESS.0 {
+                reg.wlan = Some(h);
+                // Ethernet and other paths do not require a WLAN service. IP address and
+                // route notifications above still track connection changes.
+                let _ = WlanRegisterNotification(
+                    h,
+                    WLAN_NOTIFICATION_SOURCE_ACM | WLAN_NOTIFICATION_SOURCE_MSM,
+                    false,
+                    Some(wlan_cb),
+                    Some(ctx),
+                    None,
+                    None,
+                );
             }
             let manager: INetworkListManager =
                 CoCreateInstance(&NetworkListManager, None, CLSCTX_INPROC_SERVER)

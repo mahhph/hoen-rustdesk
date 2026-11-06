@@ -34,7 +34,7 @@ pub(crate) async fn run() -> ResultType<()> {
     let policy = runtime.policy.clone();
     spawn_blocking(move || network::verify_binding(Some(&policy), addr))
         .await?
-        .map_err(|_| anyhow!("approved home network unavailable"))?;
+        .map_err(|_| anyhow!("configured bind address unavailable"))?;
     if !runtime.monitor.is_current(captured) {
         return Err(anyhow!("network changed before listening"));
     }
@@ -58,7 +58,7 @@ pub(crate) async fn run() -> ResultType<()> {
                 if !runtime.monitor.is_current(captured) { break Err(anyhow!("network changed; hosting suspended")); }
                 let policy = runtime.policy.clone();
                 let result = spawn_blocking(move || network::verify_binding(Some(&policy), addr)).await;
-                if !matches!(result, Ok(Ok(()))) { break Err(anyhow!("approved home network unavailable")); }
+                if !matches!(result, Ok(Ok(()))) { break Err(anyhow!("configured bind address unavailable")); }
             }
             Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
             accepted = listener.accept() => {

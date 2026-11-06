@@ -139,8 +139,8 @@ impl Endpoint {
     }
     pub fn new(address: IpAddr, port: u16) -> Result<Self, Error> {
         let valid = match address {
-            IpAddr::V4(v) => v.is_private(),
-            IpAddr::V6(v) => (v.segments()[0] & 0xfe00) == 0xfc00,
+            IpAddr::V4(v) => !v.is_unspecified() && !v.is_multicast(),
+            IpAddr::V6(v) => !v.is_unspecified() && !v.is_multicast(),
         };
         if !valid || port == 0 {
             return Err(Error::InvalidInput);
@@ -560,7 +560,9 @@ mod tests {
         assert!(GrantToken::from_encoded(&format!("{}B", "A".repeat(42))).is_err());
         assert!(Identity::new("operator").is_err());
         assert!(Identity::new("bad/name").is_err());
-        assert!(Endpoint::new("8.8.8.8".parse().unwrap(), 12).is_err());
+        assert!(Endpoint::new("8.8.8.8".parse().unwrap(), 12).is_ok());
+        assert!(Endpoint::new("0.0.0.0".parse().unwrap(), 12).is_err());
+        assert!(Endpoint::new("ff02::1".parse().unwrap(), 12).is_err());
         assert!(Endpoint::new("192.168.1.2".parse().unwrap(), 0).is_err());
         let (client, thread) = setup(200, serde_json::json!({"machine":record()}));
         assert!(matches!(

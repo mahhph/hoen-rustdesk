@@ -15,7 +15,7 @@ pub enum Denied {
 
 fn valid_address(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(ip) => !ip.is_unspecified() && !ip.is_multicast(),
+        IpAddr::V4(ip) => !ip.is_unspecified() && !ip.is_multicast() && !ip.is_broadcast(),
         IpAddr::V6(ip) => !ip.is_unspecified() && !ip.is_multicast(),
     }
 }

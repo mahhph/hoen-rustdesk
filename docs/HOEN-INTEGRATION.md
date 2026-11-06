@@ -19,6 +19,8 @@ Windows Phase 1 includes Lenovo and Area51 in either role, unattended locked/sig
 
 The user accepts RustDesk's supported clipboard formats, including text, images and rich text. The previous text-only filter and custom text limit are superseded. Separate file-transfer sessions remain out of scope. Clipboard content must never enter session history or mailbox audit events.
 
+Acceptance change, November 5, 2026: the user explicitly waived the live network-change disconnect trial. Keep the network enforcement and disconnect implementation, but record live transition behavior as unverified; that test is no longer a readiness gate. The user prioritized the combined Windows application build and secure enrollment/installation/rollback next.
+
 The mailbox owns enrollment, access grants, deliberately shared secrets, and metadata-only central session history. Device private keys stay local. RustDesk OSS uses a separate SQLite peer database (`db_v2.sqlite3`); the mailbox uses `mailbox.sqlite`. Do not write directly into one another's databases.
 
 ## Integration sequence and acceptance

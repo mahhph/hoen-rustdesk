@@ -71,11 +71,18 @@ pub fn verify_binding(policy: Option<&Policy>, local: SocketAddr) -> Result<(), 
     .join()
     .unwrap_or(Err(Denied::SnapshotUnavailable))
 }
-#[cfg(not(windows))]
+#[cfg(all(target_os = "macos", feature = "hoen-mac-dev"))]
+pub fn verify_binding(policy: Option<&Policy>, local: SocketAddr) -> Result<(), Denied> {
+    super::macos_network::verify_binding(policy, local)
+}
+#[cfg(any(
+    not(any(windows, target_os = "macos")),
+    all(target_os = "macos", not(feature = "hoen-mac-dev"))
+))]
 pub fn verify_binding(_: Option<&Policy>, _: SocketAddr) -> Result<(), Denied> {
     Err(Denied::SnapshotUnavailable)
 }
-/// Query Windows on a dedicated thread and apply policy to actual socket addresses.
+/// Query the platform and apply policy to actual socket addresses.
 /// The caller must reject the session on any error and separately enforce authenticated identity.
 #[cfg(windows)]
 pub fn admit_socket(
@@ -92,7 +99,18 @@ pub fn admit_socket(
     .join()
     .unwrap_or(Err(Denied::SnapshotUnavailable))
 }
-#[cfg(not(windows))]
+#[cfg(all(target_os = "macos", feature = "hoen-mac-dev"))]
+pub fn admit_socket(
+    policy: Option<&Policy>,
+    local: SocketAddr,
+    peer: SocketAddr,
+) -> Result<(), Denied> {
+    super::macos_network::admit_socket(policy, local, peer)
+}
+#[cfg(any(
+    not(any(windows, target_os = "macos")),
+    all(target_os = "macos", not(feature = "hoen-mac-dev"))
+))]
 pub fn admit_socket(_: Option<&Policy>, _: SocketAddr, _: SocketAddr) -> Result<(), Denied> {
     Err(Denied::SnapshotUnavailable)
 }
@@ -371,5 +389,20 @@ mod tests {
         assert_eq!(admit(Some(&p), &s), Ok(()));
         s.route_matches = false;
         assert_eq!(admit(Some(&p), &s), Err(Denied::NotApproved));
+    }
+    #[cfg(all(target_os = "macos", not(feature = "hoen-mac-dev")))]
+    #[test]
+    fn mac_production_admission_remains_closed_pending_live_validation() {
+        let (policy, _) = sample();
+        let local = SocketAddr::new(policy.local_address, 1234);
+        let peer: SocketAddr = "192.168.3.20:1234".parse().unwrap();
+        assert_eq!(
+            verify_binding(Some(&policy), local),
+            Err(Denied::SnapshotUnavailable)
+        );
+        assert_eq!(
+            admit_socket(Some(&policy), local, peer),
+            Err(Denied::SnapshotUnavailable)
+        );
     }
 }

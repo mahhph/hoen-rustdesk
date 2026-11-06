@@ -1,6 +1,6 @@
 # Hoen remote-session history: RustDesk integration design
 
-Status: the standalone durable outbox and a feature-gated worker are implemented; native session lifecycle hooks and deployment remain outstanding. The mailbox implementation and its exact current contract are in the sibling `mailbox-integration/docs/REMOTE-SESSION-HISTORY.md`; the live mailbox may differ and must be merged and tested rather than replaced. No conclusion about unattended access follows from this design.
+Status: the durable outbox, worker and feature-gated native lifecycle hooks are implemented; combined validation and end-to-end deployment verification remain outstanding. A recorded begin means verified host-side authorization and successful display enumeration, not capture readiness or viewer receipt. The mailbox implementation and its exact current contract are in the sibling `mailbox-integration/docs/REMOTE-SESSION-HISTORY.md`; reconcile the live service rather than replacing it wholesale. No conclusion about unattended access follows from this design.
 
 ## What the existing lifecycle proves
 

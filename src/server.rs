@@ -90,6 +90,8 @@ type ConnMap = HashMap<i32, ConnInner>;
 pub struct ConnectionMeta {
     pub control_permissions: Option<ControlPermissions>,
     pub controlled_context: Option<ControlledContext>,
+    #[cfg(feature = "hoen-mailbox")]
+    pub(crate) hoen: Option<Arc<crate::hoen::host::HostContext>>,
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -217,6 +219,7 @@ pub async fn create_tcp_connection(
     secure: bool,
     meta: ConnectionMeta,
 ) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") { bail!("legacy host transports are disabled in mailbox mode"); }
     let mut stream = stream;
     // The address the connection layer keys on, whitelist and admission alike.
     let addr = hbb_common::try_into_v4(addr);
@@ -256,6 +259,34 @@ pub async fn create_tcp_connection(
         unauthorized,
     )
     .await;
+    Ok(())
+}
+
+/// A Hoen connection takes an admission slot before network checks and its own handshake.
+#[cfg(feature = "hoen-mailbox")]
+pub(crate) async fn create_hoen_connection(
+    server: ServerPtr,
+    socket: tokio::net::TcpStream,
+    addr: SocketAddr,
+    runtime: Arc<crate::hoen::runtime::Runtime>,
+) -> ResultType<()> {
+    if crate::hoen::host::disabled() { bail!("mailbox hosting is disabled"); }
+    let addr = hbb_common::try_into_v4(addr);
+    let id = server.write().unwrap().get_new_id();
+    let unauthorized = admit_unauthorized(id, addr.ip())
+        .ok_or_else(|| hbb_common::anyhow::anyhow!("too many unauthenticated connections"))?;
+    let transport = tokio::select! {
+        result = crate::hoen::transport::Transport::accept(socket, runtime.policy.clone(), &runtime.signing_key, runtime.monitor.clone()) => result?,
+        _ = unauthorized.evicted() => bail!("connection evicted"),
+    };
+    if crate::hoen::host::disabled() { bail!("mailbox hosting is disabled"); }
+    let (mut stream, guard) = transport.into_parts();
+    stream.set_max_packet_length(MAX_UNAUTHORIZED_MESSAGE);
+    let meta = ConnectionMeta {
+        hoen: Some(Arc::new(crate::hoen::host::HostContext { runtime, guard: Arc::new(guard) })),
+        ..Default::default()
+    };
+    Connection::start(addr, stream, id, Arc::downgrade(&server), meta, unauthorized).await;
     Ok(())
 }
 

@@ -1,5 +1,7 @@
 # Hoen Windows host: build and integration notes
 
+For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).
+
 Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset and Clang and protoc were not found on PATH. Visual Studio provides CMake and Ninja. Python and Flutter were subsequently installed under `%LOCALAPPDATA%\HoenBuildTools` and are available when their directories are added to the current shell PATH; WindowsApps Python aliases are not interpreters. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
 
 ## Reproduce the x64 Windows Flutter build
@@ -111,3 +113,13 @@ VPN transport may be added under a separately reviewed future policy.
 Seq193 published `b9ade1684` and `d750e367e`; their code/build changes have
 been reviewed and integrated locally. Windows runtime and two-machine acceptance
 remain unverified on this Mac. See HOEN-MAC.md for integration status.
+
+### Native host/viewer hook checkpoint
+
+The next checkpoint wires protected enrollment, registration, verified transport and grants into both native session loops. Hoen builds reject legacy transport entry points and side switching. Host history begins after verified authorization and display enumeration, before PeerInfo; this is not capture readiness or viewer-confirmed receipt. Network notifications invalidate connection guards, with periodic OS snapshots retained. The build script now requires explicit `--hoen-mailbox` to include these hooks.
+
+Local Windows validation passed 24 selected feature-on tests and three feature-off unauthorized-connection regression tests. Both used Rust 1.75, `--locked --release --config profile.release.lto=false --config profile.release.package.rustdesk.opt-level=0 --config profile.release.package.rustdesk.codegen-units=16 --lib`; features were `flutter,hwcodec,vram,hoen-mailbox` with filter `hoen`, and `flutter,hwcodec,vram` with filter `test_unauthorized_`. Logs are `hoen-hooks-monitor-test.log` and `hoen-feature-off-test.log` in the user-local build-tools directory. These compile/tests do not constitute a packaged application or live two-machine session.
+
+Regression-surface review: `client.rs` blocks alternate legacy dials; `client/io_loop.rs` selects mailbox transport, proof and monitor handling; `server.rs` attaches verified connection context and rejects legacy accepts; `server/connection.rs` adds admission, network checks and history lifecycle hooks; `rendezvous_mediator.rs` selects the approved-interface host listener; `core_main.rs` adds explicit protected enrollment import. These changes are needed at native entry/admission/lifecycle boundaries and are feature-gated. Feature-off transport regression tests pass; the full legacy test suite has not been run. Cargo/build/CI changes enable the optional bindings and test selection. No capture/input implementation, shared submodule, or Flutter FFI signature changed.
+
+Installation, secure LocalSystem enrollment, isolated application/service naming, valid live TLS trust, active desktop/network transition evidence and unattended acceptance remain outstanding. See [installer design](HOEN-INSTALLER.md). No service or firewall rule has been installed by this checkpoint.

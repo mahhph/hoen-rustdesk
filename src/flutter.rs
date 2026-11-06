@@ -158,6 +158,8 @@ pub extern "C" fn rustdesk_core_main_args(args_len: *mut c_int) -> *mut *mut c_c
             }
             Some(crate::core_main::CoreMainAction::ExitFailure(err)) => {
                 log::error!("Command failed: {err}");
+                #[cfg(feature = "hoen-mailbox")]
+                unsafe { std::ptr::write(args_len, -1) };
             }
             None => {}
         }
@@ -166,6 +168,10 @@ pub extern "C" fn rustdesk_core_main_args(args_len: *mut c_int) -> *mut *mut c_c
     #[cfg(any(target_os = "android", target_os = "ios"))]
     return std::ptr::null_mut() as _;
 }
+
+#[cfg(all(windows, feature = "hoen-mailbox"))]
+#[no_mangle]
+pub extern "C" fn rustdesk_hoen_experimental() {}
 
 #[cfg(windows)]
 #[no_mangle]

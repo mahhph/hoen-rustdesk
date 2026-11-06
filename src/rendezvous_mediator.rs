@@ -46,6 +46,8 @@ fn connection_meta(
     ConnectionMeta {
         control_permissions,
         controlled_context,
+        #[cfg(feature = "hoen-mailbox")]
+        hoen: None,
     }
 }
 
@@ -309,6 +311,14 @@ impl RendezvousMediator {
         log::info!("server restart");
     }
 
+    #[cfg(feature = "hoen-mailbox")]
+    pub async fn start_all() {
+        if let Err(error) = crate::hoen::host::run().await {
+            log::error!("Mailbox host unavailable: {error}");
+        }
+    }
+
+    #[cfg(not(feature = "hoen-mailbox"))]
     pub async fn start_all() {
         crate::test_nat_type();
         if config::is_outgoing_only() {

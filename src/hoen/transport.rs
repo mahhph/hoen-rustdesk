@@ -385,7 +385,8 @@ mod tests {
         let policy = network::Policy {
             local_address: "127.0.0.2".parse().unwrap(),
         };
-        assert!(Transport::accept(socket, policy, &signing_key)
+        let monitor = Arc::new(NetworkMonitor::start().await.unwrap());
+        assert!(Transport::accept(socket, policy, &signing_key, monitor)
             .await
             .is_err());
 

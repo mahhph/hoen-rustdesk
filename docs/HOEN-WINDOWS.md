@@ -122,3 +122,11 @@ Checkpoint `eab9d7d87` completed the same shipping release build: Cargo reported
 Executable SHA-256: `de9d851ac39330fad1d3c979d8d99f472dc9a1d4b44d4215202aa872cc27196d`; DLL SHA-256: `47699b3114c0c555bb41a4b5a86dbd9ca2172441bf4231c0ac74245a43af157a`.
 
 This artifact includes the Windows viewer's authenticated service broker, so it can request connection proofs using the machine identity without a second user credential import. Installed LocalSystem startup, live broker IPC, desktop capture/control and installer rollback remain unverified. Production use also requires a mailbox certificate with the correct SAN; the existing SAN-less certificate is not accepted by the native TLS verifier. The network-policy expansion on the parallel branch remains unmerged pending direct user confirmation. No service was installed or started by these checks.
+
+### Isolated worker cleanup artifact (2026-11-06)
+
+Checkpoint `f2d1724ee` completed the shipping Windows build with exit 0 in **520.63 seconds (8 minutes 41 seconds)**. Cargo reported 8 minutes 23 seconds and Flutter 14.6 seconds. The actual runner rejected synthetic invalid viewer enrollment with exit 1, and the installer passed generation and exact rechecking of the new payload manifest. Log and measured result: `%LOCALAPPDATA%\HoenBuildTools\remote-desktop-f2d1724ee-build.log` and `remote-desktop-f2d1724ee-build-result.json`.
+
+Executable SHA-256: `46487d447a38b035805ea9e8a7d6a5ec7c04327e84bbdaec7d241ce849c78d2a`; DLL SHA-256: `b0a5e6605eb27382adde8bd0ef4cba8647e24dcc0333b307b0bf9ffba5251209`. This includes the mailbox worker's stock privacy-broker cleanup guard. No service installation or live desktop session was performed.
+
+A startup supervision review confirmed that a failed host returns from the worker and is normally relaunched in a fresh process, which revalidates the network and resets cached runtime state. The current service checks worker exit on an idle IPC timeout; sustained IPC traffic can delay recovery, and persistent startup failures can retry roughly every 300 ms. An independent bounded-backoff supervision check remains necessary before claiming reliable unattended startup. A missing console session or failure to obtain a Winlogon token is still a live acceptance concern. This review does not change the user's waiver of the network-change disconnect test.

@@ -137,3 +137,20 @@ with `rustc --edition 2021 --test src/hoen/network.rs`; the locked isolated
 `hoen-mailbox-auth` manifest passed all 7 tests with stable Rust. This verifies
 portable bind/path policy and proof/TLS contracts, not native runtime compilation
 or an authenticated desktop session. `git diff --check` passed.
+
+## Seq198 lifecycle correction
+
+PR #2 through `fe9e15a` is integrated, including broadcast-address rejection.
+The macOS network monitor now starts and closes with its session owner instead
+of returning Unsupported. It does not subscribe to interface changes or impose
+route policy; existing transport errors and session timeouts handle liveness.
+Mailbox identity, encrypted channel and single-use grant proof remain required.
+The Windows monitor and NetworkListManager Cargo feature are retained.
+
+Focused standalone tests compile the actual monitor module on macOS: 4/4 pass,
+including async startup/shutdown and drop invalidation. This is not a full native
+build or a host/viewer session test. The protected enrollment loader still rejects
+non-Windows platforms; Keychain provisioning for distinct host/helper and viewer
+identities is required before the complete Mac runtime can initialize.
+Regression surface of the Mac correction: only the feature-specific monitor's
+macOS startup/shutdown path changes; Windows and other platforms are unchanged.

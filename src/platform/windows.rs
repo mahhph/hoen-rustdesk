@@ -550,13 +550,20 @@ fn service_main(arguments: Vec<OsString>) {
 
 pub fn start_os_service() {
     if let Err(e) =
-        windows_service::service_dispatcher::start(crate::get_app_name(), ffi_service_main)
+        windows_service::service_dispatcher::start(remote_service_name(), ffi_service_main)
     {
         log::error!("start_service failed: {}", e);
     }
 }
 
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
+
+fn remote_service_name() -> String {
+    #[cfg(feature = "hoen-mailbox")]
+    { crate::hoen::bootstrap::SERVICE_NAME.to_owned() }
+    #[cfg(not(feature = "hoen-mailbox"))]
+    { crate::get_app_name() }
+}
 
 extern "C" {
     fn get_current_session(rdp: BOOL) -> DWORD;
@@ -670,7 +677,7 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
     };
 
     // Register system service event handler
-    let status_handle = service_control_handler::register(crate::get_app_name(), event_handler)?;
+    let status_handle = service_control_handler::register(remote_service_name(), event_handler)?;
 
     let next_status = ServiceStatus {
         // Should match the one from system service registry
@@ -4331,7 +4338,7 @@ fn get_uninstall_amyuni_idd() -> String {
 
 #[inline]
 pub fn is_self_service_running() -> bool {
-    is_service_running(&crate::get_app_name())
+    is_service_running(&remote_service_name())
 }
 
 pub fn is_service_running(service_name: &str) -> bool {

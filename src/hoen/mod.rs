@@ -7,6 +7,7 @@ pub(crate) mod handshake;
 pub(crate) mod history_worker;
 pub(crate) mod host;
 pub(crate) mod mailbox_worker;
+pub(crate) mod machine_bootstrap;
 pub(crate) mod network;
 pub(crate) mod network_monitor;
 pub(crate) mod runtime;

@@ -71,6 +71,45 @@ pub fn admit(policy: Option<&Policy>, snapshot: &Snapshot) -> Result<(), Denied>
     }
     Ok(())
 }
+/// Select exactly one preferred private IPv4 from snapshots of the enrolled adapter.
+/// The old local address is intentionally not an approval criterion: DHCP can change it.
+#[cfg(any(windows, test))]
+fn select_current_ipv4(policy: &Policy, candidates: &[Snapshot]) -> Result<IpAddr, Denied> {
+    if policy.adapter_id == 0 || policy.network_id == 0 { return Err(Denied::InvalidPolicy); }
+    let mut selected = None;
+    for snapshot in candidates {
+        let IpAddr::V4(ip) = snapshot.local_address else { continue; };
+        if !ip.is_private() { continue; }
+        let candidate = Policy { local_address: snapshot.local_address, ..policy.clone() };
+        admit_binding(Some(&candidate), snapshot)?;
+        if selected.replace(snapshot.local_address).is_some() { return Err(Denied::NotApproved); }
+    }
+    selected.ok_or(Denied::SnapshotUnavailable)
+}
+
+/// Resolve a DHCP-updated IPv4 only on the previously approved adapter and network.
+/// The caller must separately subscribe to network notifications before this query,
+/// reject a generation change afterward, and recheck before binding/registration.
+/// Run off the async executor; this starts a dedicated COM query thread.
+#[cfg(windows)]
+pub fn resolve_current_ipv4(policy: Option<&Policy>) -> Result<IpAddr, Denied> {
+    let policy = policy.ok_or(Denied::MissingPolicy)?.clone();
+    if policy.adapter_id == 0 || policy.network_id == 0 { return Err(Denied::InvalidPolicy); }
+    std::thread::spawn(move || {
+        let addresses = windows_snapshot::preferred_ipv4(policy.adapter_id).ok_or(Denied::SnapshotUnavailable)?;
+        let mut candidates = Vec::with_capacity(addresses.len());
+        for ip in addresses {
+            let snapshot = windows_snapshot::query(SocketAddr::new(ip, 0), None).ok_or(Denied::SnapshotUnavailable)?;
+            candidates.push(snapshot);
+        }
+        select_current_ipv4(&policy, &candidates)
+    }).join().unwrap_or(Err(Denied::SnapshotUnavailable))
+}
+#[cfg(not(windows))]
+pub fn resolve_current_ipv4(_: Option<&Policy>) -> Result<IpAddr, Denied> {
+    Err(Denied::SnapshotUnavailable)
+}
+
 /// Check a configured address before binding; this does not reserve it or open a listener.
 #[cfg(windows)]
 pub fn verify_binding(policy: Option<&Policy>, local: SocketAddr) -> Result<(), Denied> {
@@ -232,6 +271,42 @@ mod windows_snapshot {
             )
         }
     }
+    /// Enumerate preferred RFC1918 IPv4 addresses only on the exact approved GUID.
+    /// Security and network-profile properties are independently checked by query().
+    pub fn preferred_ipv4(adapter_id: u128) -> Option<Vec<IpAddr>> {
+        unsafe {
+            let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+            let mut bytes = 0u32;
+            if GetAdaptersAddresses(AF_INET.0 as u32, flags, None, None, &mut bytes)
+                != ERROR_BUFFER_OVERFLOW.0 || bytes == 0 || bytes > 1024 * 1024 { return None; }
+            let mut storage = vec![0usize; (bytes as usize + size_of::<usize>() - 1) / size_of::<usize>()];
+            let first = storage.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+            if GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(first), &mut bytes) != ERROR_SUCCESS.0 { return None; }
+            let mut current = first;
+            let mut matched = false;
+            let mut addresses = Vec::new();
+            while let Some(adapter) = current.as_ref() {
+                let mut guid = GUID::zeroed();
+                if ConvertInterfaceLuidToGuid(&adapter.Luid, &mut guid) != ERROR_SUCCESS { return None; }
+                if guid.to_u128() == adapter_id {
+                    if matched { return None; }
+                    matched = true;
+                    let mut unicast = adapter.FirstUnicastAddress;
+                    while let Some(address) = unicast.as_ref() {
+                        if address.DadState == IpDadStatePreferred {
+                            if let Some(IpAddr::V4(ip)) = socket_ip(address.Address.lpSockaddr, address.Address.iSockaddrLength) {
+                                if ip.is_private() { addresses.push(IpAddr::V4(ip)); }
+                            }
+                        }
+                        unicast = address.Next;
+                    }
+                }
+                current = adapter.Next;
+            }
+            if matched { Some(addresses) } else { None }
+        }
+    }
+
     pub fn query(local: SocketAddr, peer: Option<SocketAddr>) -> Option<Snapshot> {
         if peer.map_or(false, |p| local.is_ipv4() != p.is_ipv4()) {
             return None;
@@ -379,6 +454,32 @@ mod tests {
                 route_on_link: true,
             },
         )
+    }
+    #[test]
+    fn current_address_requires_one_approved_private_ipv4() {
+        let (policy, original) = sample();
+        let mut fresh = original.clone();
+        fresh.local_address = "192.168.3.44".parse().unwrap();
+        assert_eq!(select_current_ipv4(&policy, &[fresh.clone()]), Ok(fresh.local_address));
+        assert_eq!(select_current_ipv4(&policy, &[]), Err(Denied::SnapshotUnavailable));
+        let mut second = fresh.clone();
+        second.local_address = "192.168.3.45".parse().unwrap();
+        assert_eq!(select_current_ipv4(&policy, &[fresh.clone(), second]), Err(Denied::NotApproved));
+        for invalid in 0..5 {
+            let mut candidate = fresh.clone();
+            match invalid {
+                0 => candidate.adapter_id = 7,
+                1 => candidate.network_id = 7,
+                2 => candidate.wifi = false,
+                3 => candidate.interface_up = false,
+                _ => candidate.private_profile = false,
+            }
+            assert_eq!(select_current_ipv4(&policy, &[candidate]), Err(Denied::NotApproved));
+        }
+        let mut public = fresh.clone(); public.local_address = "8.8.8.8".parse().unwrap();
+        assert_eq!(select_current_ipv4(&policy, &[public]), Err(Denied::SnapshotUnavailable));
+        let mut no_id = policy.clone(); no_id.adapter_id = 0;
+        assert_eq!(select_current_ipv4(&no_id, &[fresh]), Err(Denied::InvalidPolicy));
     }
     #[test]
     fn any_unicast_peer_on_approved_network_can_reach_authentication() {

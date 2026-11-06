@@ -27,6 +27,12 @@ mod tests {
     use super::*;
 
     #[hbb_common::tokio::test]
+    async fn pinned_client_rejects_invalid_trust_before_requests() {
+        let token = AccessToken::from_encoded("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
+        assert!(matches!(MailboxWorker::start_with_pin("https://localhost/".into(), Vec::new(), token, Some([7;32])).await, Err(Error::InvalidConfiguration)));
+    }
+
+    #[hbb_common::tokio::test]
     async fn invalid_trust_configuration_fails_cleanly_from_async_runtime() {
         let token =
             AccessToken::from_encoded("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
@@ -42,12 +48,19 @@ pub(crate) struct MailboxWorker(mpsc::Sender<Request>);
 
 impl MailboxWorker {
     pub async fn start(url: String, root_pem: Vec<u8>, token: AccessToken) -> Result<Self, Error> {
+        Self::start_with_pin(url, root_pem, token, None).await
+    }
+    pub async fn start_with_pin(url: String, root_pem: Vec<u8>, token: AccessToken, pin: Option<[u8; 32]>) -> Result<Self, Error> {
         let (sender, mut receiver) = mpsc::channel(16);
         let (started, ready) = oneshot::channel();
         std::thread::Builder::new()
             .name("hoen-mailbox".into())
             .spawn(move || {
-                let client = match MailboxClient::new(&url, &root_pem, token) {
+                let result = match pin {
+                    Some(pin) => MailboxClient::new_pinned(&url, &root_pem, token, pin),
+                    None => MailboxClient::new(&url, &root_pem, token),
+                };
+                let client = match result {
                     Ok(client) => client,
                     Err(error) => {
                         let _ = started.send(Err(error));

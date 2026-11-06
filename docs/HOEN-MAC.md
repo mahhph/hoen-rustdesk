@@ -101,3 +101,20 @@ repeating the native adapter build. No app or package artifact was produced.
 Ruby Podfile syntax validation and `git diff --check` passed.
 Regression surface: only the Podfile deployment minimum changes existing
 macOS build behavior; shared runtime/protocol and feature-off code are untouched.
+
+## Mac verification of shared checkpoint 4095dc5
+
+On Apple Silicon macOS 27.2 with Xcode 27.2, merge `bf8406255930c8f88fd14b48502adeb1a566a71b`
+compiled and passed 12 selected shared `hoen::` tests with Rust 1.81.0 using
+`cargo test --locked --release --lib --features
+flutter,hwcodec,unix-file-copy-paste,screencapturekit,hoen-mailbox hoen::`.
+The first run took 211.97 seconds, with `CARGO_PROFILE_RELEASE_LTO=false`; this
+is test-build evidence, not a shipping-profile build. The Mac vcpkg environment
+with the project's pinned ARM64 libraries was supplied. The earlier missing
+`opus`/`libyuv` probe described above did not use that environment.
+
+At the same checkpoint the standalone mailbox authentication helper passed
+7 tests and history helper passed 9 tests. These tests do not enable a runtime
+connection, implement the Mac protected credential store or network provider,
+or validate the native UI/host behavior. Existing per-machine build-only changes
+were preserved outside the commits; no host was installed.

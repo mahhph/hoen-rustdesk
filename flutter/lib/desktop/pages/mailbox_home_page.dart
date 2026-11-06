@@ -15,6 +15,8 @@ class MailboxHomePage extends StatefulWidget {
 }
 
 class _MailboxHomePageState extends State<MailboxHomePage> {
+  static const _buildId = String.fromEnvironment('HOEN_BUILD_ID',
+      defaultValue: 'development');
   bool _loading = true;
   String? _status;
   String? _identity;
@@ -106,6 +108,8 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Remote Desktop Client',
                 style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 4),
+            const Text('Build: $_buildId'),
             const SizedBox(height: 12),
             const Text('Select a registered machine with hosting enabled.'),
             if (_identity != null) ...[

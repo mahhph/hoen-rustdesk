@@ -33,6 +33,7 @@ void main() {
       connect: (id) => connected = id,
     ))));
     await tester.pumpAndSettle();
+    expect(find.text('Build: development'), findsOneWidget);
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     expect(find.text('Office'), findsOneWidget);

@@ -3862,6 +3862,9 @@ class _LogoState extends State<_Logo> {
 Widget loadLogo() => const _Logo();
 
 Widget loadIcon(double size) {
+  if (bind.mainGetOptionSync(key: 'hoen-mailbox-mode') == 'Y') {
+    return Image.asset('assets/remote_desktop.png', width: size, height: size);
+  }
   return Image.asset('assets/icon.png',
       width: size,
       height: size,

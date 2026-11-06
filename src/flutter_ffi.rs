@@ -1015,10 +1015,41 @@ pub fn main_get_http_status(url: String) -> Option<String> {
 }
 
 pub fn main_get_option(key: String) -> String {
+    #[cfg(feature = "hoen-mailbox")]
+    if key == "hoen-directory" {
+        #[cfg(windows)]
+        {
+            // This synchronous FRB entry runs on a bridge worker, not the UI thread.
+            // Reject async callers instead of nesting a Tokio runtime.
+            if hbb_common::tokio::runtime::Handle::try_current().is_err() {
+                if let Ok(runtime) = hbb_common::tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    if let Ok(Ok(directory)) = runtime.block_on(async {
+                        hbb_common::tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            crate::hoen::local_proof::directory_for_viewer(),
+                        ).await
+                    }) {
+                        return serde_json::json!({
+                            "service_available": true,
+                            "identity": directory.identity,
+                            "machines": directory.machines,
+                        }).to_string();
+                    }
+                }
+            }
+        }
+        return r#"{"service_available":false,"error":"unavailable"}"#.into();
+    }
     get_option(key)
 }
 
 pub fn main_get_option_sync(key: String) -> SyncReturn<String> {
+    if key == "hoen-mailbox-mode" {
+        return SyncReturn(if cfg!(feature = "hoen-mailbox") { "Y" } else { "" }.into());
+    }
     SyncReturn(get_option(key))
 }
 
@@ -2587,7 +2618,7 @@ pub fn is_disable_group_panel() -> SyncReturn<bool> {
 
 // windows only
 pub fn is_disable_installation() -> SyncReturn<bool> {
-    SyncReturn(config::is_disable_installation())
+    SyncReturn(cfg!(feature = "hoen-mailbox") || config::is_disable_installation())
 }
 
 pub fn is_preset_password() -> bool {

@@ -28,6 +28,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.ServiceProcess
 $serviceName = 'RemoteDesktopService'
 $manifestName = '.install-manifest.json'
 $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)

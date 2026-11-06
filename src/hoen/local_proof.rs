@@ -10,6 +10,63 @@ use std::{
 
 #[derive(Clone, Debug, serde_derive::Serialize, serde_derive::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct MachineSummary {
+    pub identity: String,
+    pub display_name: String,
+    pub hosting_enabled: bool,
+}
+
+#[derive(Clone, Debug, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryResponse {
+    pub identity: String,
+    pub machines: Vec<MachineSummary>,
+}
+
+pub(crate) async fn directory(runtime: Arc<Runtime>) -> ResultType<DirectoryResponse> {
+    let machines = runtime
+        .mailbox
+        .list()
+        .await?
+        .into_iter()
+        .map(|machine| MachineSummary {
+            identity: machine.identity.as_str().to_owned(),
+            display_name: machine.display_name,
+            hosting_enabled: machine.hosting_enabled,
+        })
+        .collect();
+    Ok(DirectoryResponse {
+        identity: runtime.identity.as_str().to_owned(),
+        machines,
+    })
+}
+
+/// A successful response confirms the authenticated broker and registry responded.
+/// It does not establish whether any registered host is currently online.
+pub(crate) async fn directory_for_viewer() -> ResultType<DirectoryResponse> {
+    use crate::ipc::Data;
+    use hbb_common::{
+        anyhow::anyhow,
+        tokio::time::{timeout, Duration},
+    };
+
+    let mut connection = crate::ipc::connect_service(3_000).await?;
+    // Registry responses are bounded by the mailbox client; allow room for the
+    // JSON IPC envelope while still bounding allocation before deserialization.
+    connection.set_max_packet_length(256 * 1024);
+    timeout(
+        Duration::from_secs(3),
+        connection.send(&Data::HoenDirectoryRequest),
+    )
+    .await??;
+    match connection.next_timeout(35_000).await? {
+        Some(Data::HoenDirectoryResponse(Some(response))) => Ok(response),
+        _ => Err(anyhow!("mailbox service directory unavailable")),
+    }
+}
+
+#[derive(Clone, Debug, serde_derive::Serialize, serde_derive::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LookupRequest {
     pub host: String,
 }
@@ -97,6 +154,29 @@ pub(crate) async fn issue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_ipc_retains_registered_status_and_identity() {
+        let response = DirectoryResponse {
+            identity: "this-machine".into(),
+            machines: vec![MachineSummary {
+                identity: "other-machine".into(),
+                display_name: "Other machine".into(),
+                hosting_enabled: false,
+            }],
+        };
+        let encoded =
+            serde_json::to_vec(&crate::ipc::Data::HoenDirectoryResponse(Some(response))).unwrap();
+        let decoded: crate::ipc::Data = serde_json::from_slice(&encoded).unwrap();
+        match decoded {
+            crate::ipc::Data::HoenDirectoryResponse(Some(value)) => {
+                assert_eq!(value.identity, "this-machine");
+                assert_eq!(value.machines[0].identity, "other-machine");
+                assert!(!value.machines[0].hosting_enabled);
+            }
+            _ => panic!("unexpected IPC response"),
+        }
+    }
 
     #[test]
     fn debug_redacts_request_and_proof() {

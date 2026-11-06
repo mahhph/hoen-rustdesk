@@ -195,6 +195,9 @@ tests. The authentication and history helper suites passed 8 and 10 tests,
 respectively, and the isolated build-script checks passed 4 tests.
 The corresponding `hoen-mailbox` production-feature Mac test build also
 passed all 30 selected tests with the same toolchain and dependencies.
+The integrated `hoen-mac-dev` application also built successfully with
+`scripts/build-hoen-mac-dev.py`; its separate development bundle identifier and
+ad-hoc signature were verified. The build restored the existing Xcode edits.
 
 The monitor failure above was reproduced only in the restricted execution
 sandbox. The passing test demonstrates startup in the less-restricted command

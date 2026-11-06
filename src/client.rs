@@ -433,6 +433,12 @@ impl Client {
         (i32, String),
         bool,
     )> {
+        // Mailbox builds may only open sessions through the verified Hoen
+        // transport. Alternate legacy callers must not reach discovery or dial.
+        #[cfg(feature = "hoen-mailbox")]
+        if cfg!(feature = "hoen-mailbox") {
+            bail!("legacy connection path is disabled in mailbox mode");
+        }
         if config::is_incoming_only() && !is_switch_sides_back(conn_type, &interface).await {
             bail!("Incoming only mode");
         }

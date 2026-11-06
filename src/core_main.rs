@@ -46,6 +46,13 @@ pub fn core_main() -> Option<CoreMainAction> {
     if !crate::common::global_init() {
         return None;
     }
+    #[cfg(feature = "hoen-mailbox")]
+    if let Some(result) = crate::hoen::enrollment::command() {
+        return match result {
+            Ok(()) => None,
+            Err(error) => Some(CoreMainAction::ExitFailure(error)),
+        };
+    }
     crate::load_custom_client();
     #[cfg(windows)]
     if !crate::platform::windows::bootstrap() {

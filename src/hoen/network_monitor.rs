@@ -110,14 +110,22 @@ impl Drop for NetworkMonitor {
         }
     }
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn start_blocking() -> Result<NetworkMonitor, MonitorError> {
     Err(MonitorError::Unsupported)
+}
+#[cfg(target_os = "macos")]
+fn start_blocking() -> Result<NetworkMonitor, MonitorError> {
+    macos_monitor::start()
 }
 #[cfg(windows)]
 fn start_blocking() -> Result<NetworkMonitor, MonitorError> {
     windows_monitor::start()
 }
+
+#[cfg(target_os = "macos")]
+#[path = "macos_network_monitor.rs"]
+mod macos_monitor;
 
 #[cfg(windows)]
 mod windows_monitor {

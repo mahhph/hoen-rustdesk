@@ -1626,6 +1626,9 @@ fn get_after_install(
 }
 
 pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock installation is unavailable in Hoen mode");
+    }
     // MSI and EXE installations use different registry layouts, so MSI-to-EXE upgrades are not supported.
     let (installed_subkey, _, _, _) = get_install_info();
     if get_windows_installer_state(&installed_subkey)? == Some(true) {
@@ -1825,6 +1828,9 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
 }
 
 pub fn run_after_install() -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock installation is unavailable in Hoen mode");
+    }
     let (_, _, _, exe) = get_install_info();
     run_cmds(
         native_after_install_commands(get_after_install(&exe, None, None, None), &exe, false)?,
@@ -1834,6 +1840,9 @@ pub fn run_after_install() -> ResultType<()> {
 }
 
 pub fn run_before_uninstall() -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock uninstallation is unavailable in Hoen mode");
+    }
     run_cmds(get_before_uninstall(true)?, true, "before_install")
 }
 
@@ -1912,6 +1921,9 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
 }
 
 pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock uninstallation is unavailable in Hoen mode");
+    }
     if is_self_service_running() {
         // This CLI entry is synchronous. Portable builds reuse the retained user configuration.
         tokio::runtime::Builder::new_current_thread()
@@ -3171,6 +3183,9 @@ pub fn user_accessible_folder() -> ResultType<PathBuf> {
 
 #[inline]
 pub fn uninstall_cert() -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock certificate removal is unavailable in Hoen mode");
+    }
     cert::uninstall_cert()
 }
 
@@ -3344,6 +3359,10 @@ pub fn try_lock_tray_single_instance() -> bool {
 /// Returns `true` on failure or cancellation so the caller keeps running.
 /// Successful removal exits this process instead of returning.
 pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
+    if cfg!(feature = "hoen-mailbox") {
+        log::error!("Stock service removal is unavailable in Hoen mode");
+        return true;
+    }
     log::info!("Uninstalling service...");
     if is_self_service_running() {
         // UI/tray/CLI callers are synchronous. Refresh the file before killing its source.
@@ -3426,6 +3445,10 @@ copy /Y \"%RUSTDESK_OUTPUT_DIR%\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsof
 }
 
 pub fn install_service() -> bool {
+    if cfg!(feature = "hoen-mailbox") {
+        log::error!("Stock service installation is unavailable in Hoen mode");
+        return true;
+    }
     log::info!("Installing service...");
     let _installing = crate::platform::InstallingService::new();
     let (_, path, _, exe) = get_install_info();
@@ -3488,6 +3511,9 @@ fn get_directory_size_kb(path: &str) -> u64 {
 }
 
 pub fn update_me(debug: bool) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let app_name = crate::get_app_name();
     let src_exe = std::env::current_exe()?.to_string_lossy().to_string();
     let (subkey, path, _, exe) = get_install_info();
@@ -3970,6 +3996,9 @@ pub fn handle_custom_client_staging_dir_before_update(
 //    `1` and `3` must be done in custom actions.
 //    We need also to handle the command line parsing to find the tray processes.
 pub fn update_me_msi(msi: &str, expected_sha256: &str, quiet: bool) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     verified_update::install_verified_msi(msi, expected_sha256, quiet)
 }
 
@@ -3998,6 +4027,9 @@ pub fn handle_service_control() -> Option<std::process::ExitCode> {
     if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new("--service-control")) {
         return None;
     }
+    if cfg!(feature = "hoen-mailbox") {
+        return Some(std::process::ExitCode::FAILURE);
+    }
     extern "C" {
         fn run_service_control() -> u32;
     }
@@ -4014,6 +4046,9 @@ pub fn handle_service_control() -> Option<std::process::ExitCode> {
 }
 
 fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> ResultType<String> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock service control is unavailable in Hoen mode");
+    }
     let app_name = crate::get_app_name();
     let is_create = matches!(operation, "create-service" | "create-service-with-rollback");
     let legacy = match operation {
@@ -4975,5 +5010,25 @@ ProcessId=10136
             arg,
         );
         assert_eq!(pids.len(), 0);
+    }
+}
+
+#[cfg(all(test, feature = "hoen-mailbox"))]
+mod hoen_stock_gate_tests {
+    use super::*;
+
+    #[test]
+    fn stock_mutators_reject_before_side_effects() {
+        assert!(install_me("", String::new(), false, false).is_err());
+        assert!(uninstall_me(false).is_err());
+        assert!(run_after_install().is_err());
+        assert!(run_before_uninstall().is_err());
+        assert!(uninstall_cert().is_err());
+        assert!(install_service());
+        assert!(uninstall_service(false, false));
+        assert!(update_me(false).is_err());
+        assert!(update_me_msi("", "", false).is_err());
+        assert!(service_control_command("remove", "", false).is_err());
+        assert!(update_to_verified("", "", 0).is_err());
     }
 }

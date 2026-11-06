@@ -44,7 +44,20 @@ fn finish_macos_update(result: hbb_common::ResultType<()>) -> Option<CoreMainAct
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<CoreMainAction> {
     if !crate::common::global_init() {
+        #[cfg(all(windows, feature = "hoen-mailbox"))]
+        return Some(CoreMainAction::ExitFailure(hbb_common::anyhow::anyhow!(
+            "Hoen application namespace unavailable"
+        )));
+        #[cfg(not(all(windows, feature = "hoen-mailbox")))]
         return None;
+    }
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    if std::env::args_os().skip(1).any(|arg| {
+        arg.to_str().map_or(false, crate::hoen::bootstrap::blocked_command)
+    }) {
+        return Some(CoreMainAction::ExitFailure(hbb_common::anyhow::anyhow!(
+            "Stock installation and service control are unavailable in Hoen mode"
+        )));
     }
     #[cfg(feature = "hoen-mailbox")]
     if let Some(result) = crate::hoen::enrollment::command() {
@@ -142,6 +155,12 @@ pub fn core_main() -> Option<CoreMainAction> {
         return core_main_invoke_new_connection(std::env::args()).map(CoreMainAction::StartUi);
     }
     let click_setup = cfg!(windows) && args.is_empty() && crate::common::is_setup(&arg_exe);
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    if click_setup {
+        return Some(CoreMainAction::ExitFailure(hbb_common::anyhow::anyhow!(
+            "Stock installation is unavailable in Hoen mode"
+        )));
+    }
     if click_setup && !config::is_disable_installation() {
         args.push("--install".to_owned());
         flutter_args.push("--install".to_string());

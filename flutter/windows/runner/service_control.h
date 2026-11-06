@@ -155,14 +155,16 @@ inline DWORD RunCommand(int count, wchar_t** args) {
 // handler would first require that DLL to load. The header-only implementation
 // keeps main.cpp as a dispatch hook without adding a CMake source entry; it is
 // compiled into the existing EXE, not a separately packaged helper.
-inline std::optional<DWORD> HandleCommand(const wchar_t* command_line) {
+inline bool IsCommand(const wchar_t* command_line) {
   constexpr std::wstring_view option = L"--service-control";
   const std::wstring_view arguments(command_line);
-  if (arguments.compare(0, option.size(), option) != 0 ||
-      (arguments.size() > option.size() && arguments[option.size()] != L' ' &&
-       arguments[option.size()] != L'\t')) {
-    return std::nullopt;
-  }
+  return arguments.compare(0, option.size(), option) == 0 &&
+         (arguments.size() == option.size() || arguments[option.size()] == L' ' ||
+          arguments[option.size()] == L'\t');
+}
+
+inline std::optional<DWORD> HandleCommand(const wchar_t* command_line) {
+  if (!IsCommand(command_line)) return std::nullopt;
   int count = 0;
   wchar_t** args = CommandLineToArgvW(GetCommandLineW(), &count);
   if (!args) {

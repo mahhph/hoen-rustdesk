@@ -1,5 +1,6 @@
 //! Mailbox-mode integration. Legacy connections do not use these entry points.
 pub(crate) mod authorization;
+pub(crate) mod bootstrap;
 pub(crate) mod credentials;
 pub(crate) mod enrollment;
 pub(crate) mod handshake;

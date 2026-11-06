@@ -1,25 +1,19 @@
-//! Explicit home-network admission. No policy is ever discovered or approved automatically.
+//! Direct local-network admission. Peer identity is authenticated separately.
 //! This is a snapshot check, not a firewall, transport authentication, or transition monitor.
 //! OS queries block: invoke them from a worker, never directly on an async runtime.
 use std::net::{IpAddr, SocketAddr};
 
-/// Values must come from an explicitly approved, protected configuration, never auto-selected.
-/// GUIDs use their canonical 128-bit numeric form; peer identity is authenticated separately.
+/// The local address is selected for this socket, not pinned to a particular network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Policy {
-    pub adapter_id: u128,
-    pub network_id: u128,
     pub local_address: IpAddr,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Snapshot {
-    pub adapter_id: u128,
-    pub network_id: u128,
     pub local_address: IpAddr,
     pub peer_address: IpAddr,
-    pub wifi: bool,
+    pub physical_lan: bool,
     pub interface_up: bool,
-    pub private_profile: bool,
     pub route_matches: bool,
     pub route_on_link: bool,
 }
@@ -44,15 +38,10 @@ fn valid_ip(ip: IpAddr) -> bool {
 /// Verify the configured local address before binding a listener.
 pub fn admit_binding(policy: Option<&Policy>, snapshot: &Snapshot) -> Result<(), Denied> {
     let p = policy.ok_or(Denied::MissingPolicy)?;
-    if p.adapter_id == 0 || p.network_id == 0 || !valid_ip(p.local_address) {
+    if !valid_ip(p.local_address) {
         return Err(Denied::InvalidPolicy);
     }
-    if p.adapter_id != snapshot.adapter_id
-        || p.network_id != snapshot.network_id
-        || p.local_address != snapshot.local_address
-        || !snapshot.wifi
-        || !snapshot.interface_up
-        || !snapshot.private_profile
+    if p.local_address != snapshot.local_address || !snapshot.physical_lan || !snapshot.interface_up
     {
         return Err(Denied::NotApproved);
     }
@@ -86,7 +75,7 @@ pub fn verify_binding(policy: Option<&Policy>, local: SocketAddr) -> Result<(), 
 pub fn verify_binding(_: Option<&Policy>, _: SocketAddr) -> Result<(), Denied> {
     Err(Denied::SnapshotUnavailable)
 }
-/// Query Windows on a dedicated COM thread and apply policy to actual socket addresses.
+/// Query Windows on a dedicated thread and apply policy to actual socket addresses.
 /// The caller must reject the session on any error and separately enforce authenticated identity.
 #[cfg(windows)]
 pub fn admit_socket(
@@ -115,64 +104,17 @@ mod windows_snapshot {
         mem::size_of,
         net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     };
-    use windows::{
-        core::GUID,
-        Win32::{
-            Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS},
-            NetworkManagement::{
-                IpHelper::*,
-                Ndis::{
-                    IfOperStatusUp, MediaConnectStateConnected, NdisPhysicalMediumNative802_11,
-                    NdisPhysicalMediumWirelessLan, TUNNEL_TYPE_NONE,
-                },
-            },
-            Networking::{NetworkListManager::*, WinSock::*},
-            System::Com::{
-                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-                COINIT_MULTITHREADED,
+    use windows::Win32::{
+        Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS},
+        NetworkManagement::{
+            IpHelper::*,
+            Ndis::{
+                IfOperStatusUp, MediaConnectStateConnected, NdisPhysicalMedium802_3,
+                NdisPhysicalMediumNative802_11, NdisPhysicalMediumWirelessLan, TUNNEL_TYPE_NONE,
             },
         },
+        Networking::WinSock::*,
     };
-    struct Com;
-    impl Drop for Com {
-        fn drop(&mut self) {
-            unsafe { CoUninitialize() }
-        }
-    }
-    fn profile(adapter: GUID) -> Option<(u128, bool)> {
-        unsafe {
-            if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
-                return None;
-            }
-            let _com = Com;
-            let manager: INetworkListManager =
-                CoCreateInstance(&NetworkListManager, None, CLSCTX_INPROC_SERVER).ok()?;
-            let iter = manager.GetNetworkConnections().ok()?;
-            let mut found = None;
-            loop {
-                let mut items = [None];
-                let mut count = 0;
-                iter.Next(&mut items, Some(&mut count)).ok()?;
-                if count == 0 {
-                    break;
-                }
-                let c = items[0].take()?;
-                if c.GetAdapterId().ok()? != adapter || !c.IsConnected().ok()?.as_bool() {
-                    continue;
-                }
-                let network = c.GetNetwork().ok()?;
-                let value = (
-                    network.GetNetworkId().ok()?.to_u128(),
-                    network.GetCategory().ok()? == NLM_NETWORK_CATEGORY_PRIVATE,
-                );
-                if found.is_some() {
-                    return None;
-                }
-                found = Some(value);
-            }
-            found
-        }
-    }
     fn sock(addr: SocketAddr) -> SOCKADDR_INET {
         match addr {
             SocketAddr::V4(a) => SOCKADDR_INET {
@@ -272,21 +214,27 @@ mod windows_snapshot {
                     if matched.is_some() {
                         return None;
                     }
-                    let mut guid = GUID::zeroed();
-                    if ConvertInterfaceLuidToGuid(&adapter.Luid, &mut guid) != ERROR_SUCCESS {
-                        return None;
-                    }
                     let mut row = MIB_IF_ROW2::default();
                     row.InterfaceLuid = adapter.Luid;
                     if GetIfEntry2(&mut row) != ERROR_SUCCESS {
                         return None;
                     }
                     let flags = row.InterfaceAndOperStatusFlags._bitfield;
-                    let physical_wifi = (flags & 0x01 != 0)
+                    let physical = (flags & 0x01 != 0)
                         && (flags & 0xfa == 0)
-                        && (row.PhysicalMediumType == NdisPhysicalMediumNative802_11
-                            || row.PhysicalMediumType == NdisPhysicalMediumWirelessLan)
                         && row.MediaConnectState == MediaConnectStateConnected;
+                    let physical_lan = physical
+                        && adapter.TunnelType == TUNNEL_TYPE_NONE
+                        && match adapter.IfType {
+                            IF_TYPE_IEEE80211 => {
+                                row.PhysicalMediumType == NdisPhysicalMediumNative802_11
+                                    || row.PhysicalMediumType == NdisPhysicalMediumWirelessLan
+                            }
+                            IF_TYPE_ETHERNET_CSMACD => {
+                                row.PhysicalMediumType == NdisPhysicalMedium802_3
+                            }
+                            _ => false,
+                        };
                     let local_scope_valid = match local {
                         SocketAddr::V6(v6) if (v6.ip().segments()[0] & 0xffc0) == 0xfe80 => {
                             v6.scope_id() != 0 && v6.scope_id() == adapter.Ipv6IfIndex
@@ -294,19 +242,14 @@ mod windows_snapshot {
                         _ => true,
                     };
                     matched = Some((
-                        guid,
                         adapter.Luid,
-                        adapter.IfType == IF_TYPE_IEEE80211
-                            && adapter.TunnelType == TUNNEL_TYPE_NONE
-                            && physical_wifi
-                            && local_scope_valid,
+                        physical_lan && local_scope_valid,
                         adapter.OperStatus == IfOperStatusUp,
                     ));
                 }
                 cur = adapter.Next;
             }
-            let (adapter, luid, wifi, up) = matched?;
-            let (network_id, private_profile) = profile(adapter)?;
+            let (luid, physical_lan, up) = matched?;
             let (peer_ip, route_matches, on_link) = if let Some(peer) = peer {
                 let source = sock(local);
                 let destination = sock(peer);
@@ -341,13 +284,10 @@ mod windows_snapshot {
                 (local.ip(), false, false)
             };
             Some(Snapshot {
-                adapter_id: adapter.to_u128(),
-                network_id,
                 local_address: local.ip(),
                 peer_address: peer_ip,
-                wifi,
+                physical_lan,
                 interface_up: up,
-                private_profile,
                 route_matches,
                 route_on_link: on_link,
             })
@@ -363,43 +303,37 @@ mod tests {
         let peer = "192.168.3.20".parse().unwrap();
         (
             Policy {
-                adapter_id: 1,
-                network_id: 2,
                 local_address: local,
             },
             Snapshot {
-                adapter_id: 1,
-                network_id: 2,
                 local_address: local,
                 peer_address: peer,
-                wifi: true,
+                physical_lan: true,
                 interface_up: true,
-                private_profile: true,
                 route_matches: true,
                 route_on_link: true,
             },
         )
     }
     #[test]
-    fn any_unicast_peer_on_approved_network_can_reach_authentication() {
+    fn any_on_link_peer_on_a_physical_lan_can_reach_authentication() {
         let (p, mut s) = sample();
         assert_eq!(admit(None, &s), Err(Denied::MissingPolicy));
         assert_eq!(admit(Some(&p), &s), Ok(()));
         s.peer_address = "192.168.3.21".parse().unwrap();
         assert_eq!(admit(Some(&p), &s), Ok(()));
-        s.network_id = 3;
+        s.route_on_link = false;
         assert_eq!(admit(Some(&p), &s), Err(Denied::NotApproved));
     }
     #[test]
-    fn rejects_public_virtual_offline_and_routed_paths() {
+    fn rejects_virtual_offline_and_routed_paths() {
         let (p, s) = sample();
-        for v in 0..5 {
+        for v in 0..4 {
             let mut x = s.clone();
             match v {
-                0 => x.wifi = false,
-                1 => x.private_profile = false,
-                2 => x.interface_up = false,
-                3 => x.route_matches = false,
+                0 => x.physical_lan = false,
+                1 => x.interface_up = false,
+                2 => x.route_matches = false,
                 _ => x.route_on_link = false,
             };
             assert_eq!(admit(Some(&p), &x), Err(Denied::NotApproved));
@@ -409,9 +343,9 @@ mod tests {
     #[test]
     fn rejects_invalid_policy_and_non_unicast_or_self_peers() {
         let (mut p, mut s) = sample();
-        p.adapter_id = 0;
+        p.local_address = "0.0.0.0".parse().unwrap();
         assert_eq!(admit(Some(&p), &s), Err(Denied::InvalidPolicy));
-        p.adapter_id = 1;
+        p.local_address = s.local_address;
         for addr in [
             "0.0.0.0",
             "0.1.2.3",

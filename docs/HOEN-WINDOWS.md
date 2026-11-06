@@ -96,3 +96,18 @@ The tests cover real loopback TCP encryption and matching channel bindings, host
 The new native modules are not called by the existing desktop session loops yet. Remaining gates include enrollment and protected configuration provisioning, viewer/host startup hooks, final admission and small-frame/liveness checks, network-change teardown, lifecycle history hooks, live mailbox API reconciliation/deployment, installation/rollback and two-machine acceptance. No host service or firewall rule was installed. Area51 has begun the separately authorized matching-baseline build setup; its comparison timings remain pending.
 
 Regression surface at this checkpoint: the root Cargo manifests/lock add optional dependencies and OS bindings; `src/lib.rs` adds a feature-gated module; client-only protobuf definitions add optional fields; Windows/Mac CI commands include the feature tests. Existing desktop login, capture, input, clipboard, and service runtime paths are unchanged. No `hbb_common` submodule change was made.
+
+## Superseding direct-LAN policy (seq191)
+
+Earlier approved-home-interface/network language above is superseded: permit
+any same LAN over physical Wi-Fi or Ethernet without SSID, network GUID,
+named-network or adapter pins and without requiring a Windows Private profile.
+Do not change MeshMonkey or another network profile for Hoen authorization;
+seq189's request is superseded. Keep actual socket/interface and on-link route
+checks with cryptographic mailbox identity and single-use grants. No public
+rendezvous/relay, router exposure, password or manual-approval fallback is
+permitted. Firewall provisioning remains a separate reviewed integration step.
+VPN transport may be added under a separately reviewed future policy.
+Seq193 published `b9ade1684` and `d750e367e`; their code/build changes have
+been reviewed and integrated locally. Windows runtime and two-machine acceptance
+remain unverified on this Mac. See HOEN-MAC.md for integration status.

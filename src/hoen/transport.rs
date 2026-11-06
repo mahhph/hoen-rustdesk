@@ -27,7 +27,7 @@ pub(crate) struct Transport {
 async fn admit(policy: network::Policy, local: SocketAddr, peer: SocketAddr) -> ResultType<()> {
     spawn_blocking(move || network::admit_socket(Some(&policy), local, peer))
         .await?
-        .map_err(|_| anyhow!("connection is outside the approved home network"))
+        .map_err(|_| anyhow!("connection is outside the current local-network scope"))
 }
 
 impl Transport {
@@ -76,7 +76,7 @@ impl Transport {
         Ok((transport, proof))
     }
 
-    /// The caller must also validate the approved address before opening its listener.
+    /// The caller must also validate the selected local address before opening its listener.
     pub async fn accept(
         socket: TcpStream,
         policy: network::Policy,
@@ -108,5 +108,31 @@ impl Transport {
             authorization::consume_proof(mailbox, local_identity, &self.channel, proof).await?;
         self.recheck().await?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hbb_common::tokio::net::TcpListener;
+
+    #[hbb_common::tokio::test]
+    async fn unapproved_socket_closes_before_host_greeting() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) =
+            hbb_common::tokio::join!(TcpStream::connect(address), listener.accept(),);
+        let (socket, _) = accepted.unwrap();
+        let (_, signing_key) = sign::gen_keypair();
+        let policy = network::Policy {
+            local_address: address.ip(),
+        };
+        assert!(Transport::accept(socket, policy, &signing_key)
+            .await
+            .is_err());
+
+        let mut peer = Stream::from(client.unwrap(), address);
+        let received = timeout(Duration::from_secs(1), peer.next()).await.unwrap();
+        assert!(!matches!(received, Some(Ok(_))));
     }
 }

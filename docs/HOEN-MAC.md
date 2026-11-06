@@ -35,10 +35,10 @@ At commit `92dfd7e4aabe746f4c3acfbf4dd005d8aaedcdc6`, the upstream direct
 IP/domain branches in `src/client.rs` return a TCP connection before the shared
 secure handshake. `src/rendezvous_mediator.rs` uses `listen_any` for its direct
 server. These paths are shared across desktop platforms, including macOS; neither
-a direct address nor a listener proves approved-home-network admission or a
+a direct address nor a listener proves direct-LAN admission or a
 verified mailbox identity. Do not expose the direct server as a Hoen host until
 the planned authenticated handshake, grant validation, transport provenance,
-and approved-interface enforcement are implemented and tested. Follow
+and actual socket/interface and on-link route enforcement are implemented and tested. Follow
 `HOEN-AUTH.md`; do not use legacy fallback in Hoen mode.
 
 ## Evidence and remaining gates
@@ -72,9 +72,9 @@ credentials remain local; mailbox identity is cryptographic, not a display name.
 
 `network::verify_binding` and `network::admit_socket` return
 `SnapshotUnavailable` on macOS. Both host and viewer must remain denied until
-an approved macOS interface/network policy, actual local/peer route checks and
+a macOS direct-LAN provider, actual local/peer route checks and
 network-change revalidation are implemented. Windows adapter/network GUIDs
-are not an implemented macOS approval identity. Coordinate any shared policy
+are not macOS approval identities and must not become policy pins. Coordinate any shared policy
 contract change before coding it.
 
 The seq159 TLS transition remains preparation only. Strict HTTPS clients need
@@ -101,3 +101,27 @@ repeating the native adapter build. No app or package artifact was produced.
 Ruby Podfile syntax validation and `git diff --check` passed.
 Regression surface: only the Podfile deployment minimum changes existing
 macOS build behavior; shared runtime/protocol and feature-off code are untouched.
+
+## Direct-LAN clarification (mailbox seq191)
+
+Seq191, request `683e1f69-ab87-4691-95c4-24f3b3ba57dc`, supersedes
+the home-Wi-Fi, approved-SSID/adapter and Windows Private-profile assumptions,
+including seq189's request to change MeshMonkey's profile. Any same LAN over
+physical Wi-Fi or Ethernet is in scope. Do not pin an SSID, network GUID,
+named network or adapter, and do not change a network profile for authorization.
+Actual bound socket/interface and on-link route checks, cryptographic mailbox
+identity and single-use grant proof remain required. Hoen mode has no public
+rendezvous/relay, router exposure, password or manual-approval fallback.
+Windows firewall provisioning is a separate reviewed integration step.
+
+VPN is acceptable future scope under a separately reviewed transport policy;
+the direct-LAN helper may reject VPN until implemented. The Mac provider still
+returns `SnapshotUnavailable`, so no Mac admission behavior changes here.
+Seq193 published commits `b9ade1684` and `d750e367e` on
+`codex/area51-hoen-admission-guard`. Their five code/build file changes were
+reviewed and applied locally without conflicts, preserving the existing Mac
+documentation edits. Legacy host login rejects mailbox proofs; the direct-LAN
+helper removes network/profile pins and checks physical Wi-Fi or Ethernet.
+Area51's 17/17 feature-gated tests remain sender-reported, not locally reproduced.
+Host listener, viewer login, enrollment and two-machine acceptance remain
+incomplete; session readiness is not established.

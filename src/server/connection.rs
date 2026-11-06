@@ -1857,6 +1857,11 @@ impl Connection {
         if self.authorized {
             return true;
         }
+        #[cfg(feature = "hoen-mailbox")]
+        if crate::hoen::authorization::reject_legacy_proof(&self.lr).is_err() {
+            self.send_login_error("Connection not allowed").await;
+            return false;
+        }
         if self.require_2fa.is_some() && !self.is_recent_session(true) && !self.from_switch {
             self.require_2fa.as_ref().map(|totp| {
                 let bot = crate::auth_2fa::TelegramBot::get();
@@ -2896,6 +2901,13 @@ impl Connection {
                 log::info!("receive close reason: {}", s);
                 self.on_close("Peer close", true).await;
                 raii::AuthedConnID::check_remove_session(self.inner.id(), self.session_key());
+                return false;
+            }
+        }
+        #[cfg(feature = "hoen-mailbox")]
+        if let Some(message::Union::LoginRequest(lr)) = msg.union.as_ref() {
+            if crate::hoen::authorization::reject_legacy_proof(lr).is_err() {
+                self.send_login_error("Connection not allowed").await;
                 return false;
             }
         }

@@ -6,7 +6,7 @@ SSID, interface type, OS category and peer route are not authorization checks.
 Mac retains Keychain enrollment and the development app namespace, but no longer
 queries Wi-Fi identifiers or automatically selects a pinned-network address.
 Network notifications may terminate a session; reconnection requires fresh proof.
-The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+At host startup the address is selected using the operating system's route to the mailbox; outgoing sockets use the route to their target. The registry advertises one address, so multiple active paths need further discovery or relay support. Relay is unimplemented.
 Earlier seq191/193 admission descriptions are historical and superseded.
 
 For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).

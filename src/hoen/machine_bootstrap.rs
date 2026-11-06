@@ -271,7 +271,8 @@ mod windows_bootstrap {
         adapter_id: Option<serde::de::IgnoredAny>,
         #[serde(default)]
         network_id: Option<serde::de::IgnoredAny>,
-        local_address: serde::de::IgnoredAny,
+        #[serde(default)]
+        local_address: Option<serde::de::IgnoredAny>,
         listen_port: serde::de::IgnoredAny,
     }
     fn validate_shape(secret: &Secret) -> Result<(), StoreError> {

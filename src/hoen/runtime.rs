@@ -60,7 +60,8 @@ struct Enrollment {
     _legacy_adapter_id: Option<String>,
     #[serde(default, rename = "network_id")]
     _legacy_network_id: Option<String>,
-    local_address: IpAddr,
+    #[serde(default)]
+    local_address: Option<IpAddr>,
     listen_port: u16,
     hosting_enabled: bool,
 }
@@ -113,7 +114,8 @@ struct BootstrapConfig {
     legacy_adapter_id: Option<String>,
     #[serde(default, rename = "network_id")]
     legacy_network_id: Option<String>,
-    local_address: IpAddr,
+    #[serde(default)]
+    local_address: Option<IpAddr>,
     listen_port: u16,
 }
 
@@ -179,7 +181,9 @@ fn parse(secret: &[u8]) -> ResultType<Enrollment> {
     Identity::new(&value.identity)?;
     AccessToken::from_encoded(&value.access_token)?;
     if let Some(pin) = &value.mailbox_leaf_fingerprint { Fingerprint::parse(pin)?; }
-    Endpoint::new(value.local_address, value.listen_port)?;
+    if let Some(address) = value.local_address {
+        Endpoint::new(address, value.listen_port)?;
+    }
     let url =
         url::Url::parse(&value.mailbox_url).map_err(|_| anyhow!("invalid mailbox endpoint"))?;
     if url.scheme() != "https"
@@ -374,6 +378,15 @@ fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
     bail!("protected mailbox enrollment is not implemented on this platform");
 }
 
+fn resolve_local_address(mailbox_url: &url::Url) -> ResultType<IpAddr> {
+    mailbox_url
+        .socket_addrs(|| None)?
+        .into_iter()
+        .filter_map(|remote| network::local_address_for(remote).ok())
+        .find(|address| Endpoint::new(*address, 1).is_ok())
+        .ok_or_else(|| anyhow!("no local address available for mailbox"))
+}
+
 async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>> {
     let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
     let leaf_pin = enrollment.mailbox_leaf_fingerprint.as_deref()
@@ -381,15 +394,19 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     if hosting && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
     }
-    let policy = network::Policy {
-        local_address: enrollment.local_address,
-    };
     let monitor = Arc::new(
         NetworkMonitor::start()
             .await
             .map_err(|_| anyhow!("network monitoring unavailable"))?,
     );
     let captured = monitor.state();
+    let mailbox_url = url::Url::parse(&enrollment.mailbox_url)?;
+    let local_address = hbb_common::tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        spawn_blocking(move || resolve_local_address(&mailbox_url)),
+    )
+    .await???;
+    let policy = network::Policy { local_address };
     let check_policy = policy.clone();
     let address = SocketAddr::new(policy.local_address, enrollment.listen_port);
     spawn_blocking(move || network::verify_binding(Some(&check_policy), address))
@@ -486,6 +503,15 @@ pub(crate) async fn machine_for_service() -> ResultType<Arc<Runtime>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_resolves_current_address_instead_of_using_enrollment_address() {
+        let enrollment = parse(&serde_json::to_vec(&fixture()).unwrap()).unwrap();
+        let mailbox = url::Url::parse("https://127.0.0.1:42819/").unwrap();
+        let address = resolve_local_address(&mailbox).unwrap();
+        assert_eq!(address, "127.0.0.1".parse::<IpAddr>().unwrap());
+        assert_ne!(Some(address), enrollment.local_address);
+    }
     fn fixture() -> serde_json::Value {
         serde_json::json!({
             "schema_version": 1, "identity": "test-viewer", "display_name": "Test viewer",
@@ -511,6 +537,9 @@ mod tests {
         assert!(enrollment.hosting_enabled);
         let roundtrip = parse(&serde_json::to_vec(&enrollment).unwrap()).unwrap();
         assert!(roundtrip == enrollment);
+        let mut automatic = input.clone();
+        automatic["config"].as_object_mut().unwrap().remove("local_address");
+        assert!(transform_bootstrap(&serde_json::to_vec(&automatic).unwrap(), [9;32]).is_ok());
         let mut old = input.clone();
         old["config"]["adapter_id"] = serde_json::json!("legacy");
         old["config"]["network_id"] = serde_json::json!("legacy");
@@ -544,6 +573,9 @@ mod tests {
         legacy["adapter_id"] = serde_json::json!("previous-network-id");
         legacy["network_id"] = serde_json::json!("previous-network-id");
         assert!(parse(&serde_json::to_vec(&legacy).unwrap()).is_ok());
+        let mut automatic = valid.clone();
+        automatic.as_object_mut().unwrap().remove("local_address");
+        assert!(parse(&serde_json::to_vec(&automatic).unwrap()).is_ok());
         let mut unknown = valid;
         unknown["disable_authentication"] = serde_json::json!(true);
         assert!(parse(&serde_json::to_vec(&unknown).unwrap()).is_err());

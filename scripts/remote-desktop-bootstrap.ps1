@@ -120,7 +120,7 @@ try {
     if ($approvedInput) { [Array]::Clear($approvedInput.Bytes,0,$approvedInput.Bytes.Length) }
 }
 Require-Fields $client @('url','fingerprint','environment','token')
-Require-Fields $config @('identity','display_name','mailbox_ca_pem','local_address','listen_port')
+Require-Fields $config @('identity','display_name','mailbox_ca_pem','listen_port')
 if ($client.environment -cne 'production') { throw 'Mailbox environment must be production.' }
 $uri = $null
 if (-not [Uri]::TryCreate([string]$client.url,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -cne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.AbsolutePath -cne '/' -or $uri.Query -or $uri.Fragment) { throw 'Invalid HTTPS mailbox endpoint.' }
@@ -145,8 +145,6 @@ try {
 if ([string]$config.identity -cnotmatch '^[a-z][a-z0-9-]{0,63}$' -or $config.identity -ceq 'operator') { throw 'Invalid device identity.' }
 $name=[string]$config.display_name
 if (-not $name -or $name.Length -gt 128 -or $name.Trim() -cne $name -or $name -match '[\x00-\x1f\x7f]') { throw 'Invalid display name.' }
-$address=$null
-if (-not [Net.IPAddress]::TryParse([string]$config.local_address,[ref]$address) -or $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $address.Equals([Net.IPAddress]::Any)) { throw 'Invalid local bind address.' }
 $port=0
 if (-not [int]::TryParse([string]$config.listen_port,[ref]$port) -or $port -lt 1 -or $port -gt 65535) { throw 'Invalid listener port.' }
 if ($Action -eq 'Validate') { [pscustomobject]@{ ClientSha256=$clientInput.Sha256; ApprovedSha256=$approvedInput.Sha256 }; return }
@@ -258,7 +256,7 @@ try {
     [RemoteBootstrapNative]::CreateProtected($bootstrap,$sdbytes)
     $handles.Add([RemoteBootstrapNative]::HoldDirectory($bootstrap)); Assert-PrivateDirectory $bootstrap
     if (Test-Path -LiteralPath $final) { throw 'Bootstrap already exists; refusing to replace it.' }
-    $document=[ordered]@{ schema_version=1; client=[ordered]@{ url=[string]$client.url; fingerprint=$fingerprint; environment='production'; token=[string]$client.token }; config=[ordered]@{ identity=[string]$config.identity; display_name=$name; mailbox_ca_pem=$pem; local_address=[string]$address; listen_port=$port } }
+    $document=[ordered]@{ schema_version=1; client=[ordered]@{ url=[string]$client.url; fingerprint=$fingerprint; environment='production'; token=[string]$client.token }; config=[ordered]@{ identity=[string]$config.identity; display_name=$name; mailbox_ca_pem=$pem; listen_port=$port } }
     $json=ConvertTo-Json -InputObject $document -Compress -Depth 5
     $plaintext=[Text.Encoding]::UTF8.GetBytes($json)
     $encrypted=[Security.Cryptography.ProtectedData]::Protect($plaintext,$entropy,[Security.Cryptography.DataProtectionScope]::LocalMachine)

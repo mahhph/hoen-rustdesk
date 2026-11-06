@@ -104,6 +104,28 @@ pub struct Remote<T: InvokeUiSession> {
     sent_close_reason: bool,
     cursor_dedupe: CursorDedupe,
     trusted_device: crate::trusted_devices::client::Session,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen: Option<HoenConnection>,
+}
+
+#[cfg(feature = "hoen-mailbox")]
+struct HoenConnection {
+    guard: crate::hoen::transport::NetworkGuard,
+    proof: Option<HoenProof>,
+    host: String,
+    login_sent: bool,
+}
+
+#[cfg(feature = "hoen-mailbox")]
+fn hoen_forbids_session_control(msg: &Message) -> bool {
+    matches!(msg.union.as_ref(), Some(message::Union::LoginRequest(_)) | Some(message::Union::SwitchSidesResponse(_)))
+        || matches!(msg.union.as_ref(), Some(message::Union::Misc(m)) if matches!(m.union.as_ref(), Some(misc::Union::SwitchSidesRequest(_)) | Some(misc::Union::SwitchBack(_))))
+}
+
+#[cfg(feature = "hoen-mailbox")]
+fn hoen_frame_valid(bytes: &[u8]) -> bool {
+    crate::hoen::transport::validate_decrypted_frame(bytes).is_ok()
+        && Message::parse_from_bytes(bytes).map_or(false, |message| message.union.is_some())
 }
 
 #[derive(Default)]
@@ -124,6 +146,10 @@ impl ParsedPeerInfo {
 }
 
 impl<T: InvokeUiSession> Remote<T> {
+    #[cfg(feature = "hoen-mailbox")]
+    fn hoen_current(&self) -> bool {
+        self.hoen.as_ref().map_or(false, |connection| connection.guard.is_current())
+    }
     pub fn new(
         handler: Session<T>,
         receiver: mpsc::UnboundedReceiver<Data>,
@@ -158,10 +184,41 @@ impl<T: InvokeUiSession> Remote<T> {
             sent_close_reason: false,
             cursor_dedupe: Default::default(),
             trusted_device: Default::default(),
+            #[cfg(feature = "hoen-mailbox")]
+            hoen: None,
         }
     }
 
+    #[cfg(feature = "hoen-mailbox")]
+    async fn send_hoen_login(&mut self, peer: &mut Stream) -> hbb_common::ResultType<()> {
+        use hbb_common::anyhow::{anyhow, bail};
+        let connection = self.hoen.as_ref().ok_or_else(|| anyhow!("mailbox connection is unavailable"))?;
+        let proof = connection.proof.as_ref().ok_or_else(|| anyhow!("mailbox proof is no longer available"))?;
+        time::timeout(Duration::from_secs(5), connection.guard.recheck()).await??;
+        let mut message = self.handler.lc.read().unwrap().create_login_msg(String::new(), String::new(), Vec::new());
+        match message.union.as_mut() {
+            Some(message::Union::LoginRequest(login)) if login.union.is_none() => {
+                login.username = connection.host.clone();
+                login.hoen_proof = Some(proof.clone()).into();
+            }
+            _ => bail!("mailbox mode only supports desktop sessions"),
+        }
+        if !connection.guard.is_current() { bail!("approved network changed"); }
+        peer.send(&message).await?;
+        if let Some(connection) = self.hoen.as_mut() { connection.login_sent = true; }
+        Ok(())
+    }
+
     pub async fn io_loop(&mut self, key: &str, token: &str, round: u32) {
+        #[cfg(feature = "hoen-mailbox")]
+        {
+            self.hoen = None;
+            if !self.handler.is_default() || config::is_incoming_only() {
+                self.handler.on_establish_connection_error("Mailbox mode requires an outgoing desktop session".into());
+                self.handle_disconnected(round);
+                return;
+            }
+        }
         #[cfg(target_os = "windows")]
         let _file_clip_context_holder = {
             // `is_port_forward()` will not reach here, but we still check it for clarity.
@@ -195,27 +252,47 @@ impl<T: InvokeUiSession> Remote<T> {
             ConnType::default()
         };
 
-        match Client::start(
+        #[cfg(not(feature = "hoen-mailbox"))]
+        let connection = Client::start(
             &self.handler.get_id(),
             key,
             token,
             conn_type,
             self.handler.clone(),
         )
-        .await
-        {
+        .await;
+        #[cfg(feature = "hoen-mailbox")]
+        let connection = async {
+            use hbb_common::anyhow::bail;
+            let entered = self.handler.get_id();
+            let name = entered.strip_prefix("hoen:").unwrap_or(&entered);
+            let host = hoen_mailbox_auth::mailbox::Identity::new(name)?;
+            let runtime = crate::hoen::runtime::viewer().await?;
+            let (transport, proof) = crate::hoen::transport::Transport::connect(
+                runtime.policy.clone(), &runtime.mailbox, host, &runtime.signing_key, runtime.monitor.clone(),
+            ).await?;
+            let (peer, guard) = transport.into_parts();
+            if !peer.is_secured() { bail!("mailbox transport is not encrypted"); }
+            let host_key = guard.channel.host_key.to_vec();
+            self.hoen = Some(HoenConnection { guard, proof: Some(proof), host: name.to_owned(), login_sent: false });
+            Ok::<_, hbb_common::anyhow::Error>(((peer, true, Some(host_key), None::<crate::kcp_stream::KcpStream>, "Hoen TCP"), (0, String::new())))
+        }.await;
+        match connection {
             Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server))) => {
+                #[cfg(not(feature = "hoen-mailbox"))]
                 self.handler
                     .connection_round_state
                     .lock()
                     .unwrap()
                     .set_connected();
                 let is_secured = peer.is_secured();
+                #[cfg(not(feature = "hoen-mailbox"))]
                 let trust = crate::trusted_devices::client::Session::new(
                     &self.handler.lc.read().unwrap(),
                     is_secured,
                     pk.as_deref(),
                 );
+                #[cfg(not(feature = "hoen-mailbox"))]
                 match trust {
                     Ok(trust) => {
                         self.trusted_device = trust;
@@ -227,6 +304,11 @@ impl<T: InvokeUiSession> Remote<T> {
                         return;
                     }
                 }
+                #[cfg(feature = "hoen-mailbox")]
+                {
+                    self.trusted_device = Default::default();
+                    self.handler.lc.write().unwrap().enable_trusted_devices = false;
+                }
                 // Only WebRTC needs refining: its label names the transport that won the race,
                 // not the family ICE ended up nominating, and it is the one path where the two
                 // can disagree with the address the rendezvous observed.
@@ -235,8 +317,10 @@ impl<T: InvokeUiSession> Remote<T> {
                 } else {
                     stream_type
                 };
+                #[cfg(not(feature = "hoen-mailbox"))]
                 self.handler
                     .set_connection_type(is_secured, direct, stream_type); // flutter -> connection_ready
+                #[cfg(not(feature = "hoen-mailbox"))]
                 if !is_secured
                     && !crate::common::is_direct_ip_access(&self.handler.get_id())
                     && !client::confirm_insecure_connection(&self.handler, &mut self.receiver).await
@@ -289,10 +373,35 @@ impl<T: InvokeUiSession> Remote<T> {
                 let mut webrtc_suspect_since: Option<Instant> = None;
                 let mut last_rx_progress = peer.rx_progress();
                 let mut peer_gone = false;
+                #[cfg(feature = "hoen-mailbox")]
+                let mut hoen_network_events = match self.hoen.as_ref() {
+                    Some(connection) => connection.guard.subscribe(),
+                    None => {
+                        self.handler.on_establish_connection_error("Mailbox network monitor unavailable".into());
+                        self.handle_disconnected(round);
+                        return;
+                    }
+                };
 
                 loop {
+                    #[cfg(feature = "hoen-mailbox")]
+                    if !self.hoen_current() {
+                        self.handler.on_establish_connection_error("Approved home network changed".into());
+                        break;
+                    }
                     tokio::select! {
-                        res = peer.next() => {
+                        res = async {
+                            #[cfg(feature = "hoen-mailbox")]
+                            {
+                                tokio::select! {
+                                    biased;
+                                    _ = hoen_network_events.changed() => Some(Err(std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "Approved home network changed"))),
+                                    result = peer.next() => result,
+                                }
+                            }
+                            #[cfg(not(feature = "hoen-mailbox"))]
+                            { peer.next().await }
+                        } => {
                             if let Some(res) = res {
                                 match res {
                                     Err(err) => {
@@ -300,6 +409,11 @@ impl<T: InvokeUiSession> Remote<T> {
                                         break;
                                     }
                                     Ok(ref bytes) => {
+                                        #[cfg(feature = "hoen-mailbox")]
+                                        if !self.hoen_current() || !hoen_frame_valid(bytes) {
+                                            self.handler.on_establish_connection_error("Invalid mailbox session frame".into());
+                                            break;
+                                        }
                                         last_recv_time = Instant::now();
                                         if !received {
                                             received = true;
@@ -323,6 +437,8 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         d = self.receiver.recv() => {
+                            #[cfg(feature = "hoen-mailbox")]
+                            if !self.hoen_current() { break; }
                             if let Some(d) = d {
                                 if !self.handle_msg_from_ui(d, &mut peer).await {
                                     break;
@@ -330,10 +446,14 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         _msg = rx_clip_client.recv() => {
+                            #[cfg(feature = "hoen-mailbox")]
+                            if !self.hoen_current() { break; }
                             #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
                             self.handle_local_clipboard_msg(&mut peer, _msg).await;
                         }
                         _ = self.timer.tick() => {
+                            #[cfg(feature = "hoen-mailbox")]
+                            if !self.hoen_current() { break; }
                             if last_recv_time.elapsed() >= SEC30 {
                                 self.handler.msgbox("error", "Connection Error", "Timeout", "");
                                 break;
@@ -349,6 +469,20 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         _ = status_timer.tick() => {
+                            // Notifications invalidate the guard; snapshots provide a
+                            // second check for changes the OS did not notify.
+                            #[cfg(feature = "hoen-mailbox")]
+                            {
+                                let allowed = match self.hoen.as_ref() {
+                                    Some(connection) => matches!(time::timeout(Duration::from_secs(5), connection.guard.recheck()).await, Ok(Ok(()))),
+                                    None => false,
+                                };
+                                if !allowed {
+                                    self.handler.on_establish_connection_error("Approved home network is unavailable".into());
+                                    break;
+                                }
+                                if !self.hoen_current() { break; }
+                            }
                             if self.handler.is_restarting_remote_device()
                                 && last_recv_time.elapsed() >= RESTART_REMOTE_DEVICE_NO_DATA_TIMEOUT
                             {
@@ -447,6 +581,8 @@ impl<T: InvokeUiSession> Remote<T> {
                 self.handler.on_establish_connection_error(err.to_string());
             }
         }
+        #[cfg(feature = "hoen-mailbox")]
+        { self.hoen = None; }
         self.handle_disconnected(round);
         #[cfg(target_os = "android")]
         for job in &mut self.write_jobs {
@@ -761,6 +897,15 @@ impl<T: InvokeUiSession> Remote<T> {
                 return false;
             }
             Data::Login((os_username, os_password, password, remember)) => {
+                #[cfg(feature = "hoen-mailbox")]
+                {
+                    let _ = (os_username, os_password, password, remember);
+                    if let Err(error) = self.send_hoen_login(peer).await {
+                        self.handler.on_error(&error.to_string());
+                        return false;
+                    }
+                }
+                #[cfg(not(feature = "hoen-mailbox"))]
                 self.handler
                     .handle_login_from_ui(
                         os_username,
@@ -798,6 +943,17 @@ impl<T: InvokeUiSession> Remote<T> {
                 }
             }
             Data::Message(msg) => {
+                #[cfg(feature = "hoen-mailbox")]
+                if hoen_forbids_session_control(&msg) {
+                    self.handler.on_error("Unsupported mailbox session control");
+                    return false;
+                }
+                #[cfg(feature = "hoen-mailbox")]
+                if !self.is_connected && matches!(msg.union.as_ref(),
+                    Some(message::Union::Clipboard(_)) | Some(message::Union::MultiClipboards(_)) | Some(message::Union::Cliprdr(_)))
+                {
+                    return true;
+                }
                 let msg = self.trusted_device.outgoing(msg);
                 // The Flutter clipboard broadcast is process-wide, so a clipboard can reach this
                 // round's queue before the round has logged in; it is dropped here, on the round
@@ -1695,6 +1851,19 @@ impl<T: InvokeUiSession> Remote<T> {
 
     async fn handle_msg_from_peer(&mut self, data: &[u8], peer: &mut Stream) -> bool {
         if let Ok(msg_in) = Message::parse_from_bytes(&data) {
+            #[cfg(feature = "hoen-mailbox")]
+            if hoen_forbids_session_control(&msg_in) {
+                self.handler.on_error("Unsupported mailbox session control");
+                return false;
+            }
+            #[cfg(feature = "hoen-mailbox")]
+            if !self.is_connected
+                && !matches!(msg_in.union.as_ref(), Some(message::Union::Hash(_)) | Some(message::Union::LoginResponse(_)) | Some(message::Union::TestDelay(_)))
+                && !matches!(msg_in.union.as_ref(), Some(message::Union::Misc(m)) if matches!(m.union.as_ref(), Some(misc::Union::CloseReason(_))))
+            {
+                self.handler.on_error("Unexpected mailbox message before admission");
+                return false;
+            }
             match msg_in.union {
                 Some(message::Union::VideoFrame(vf)) => {
                     if !self.first_frame {
@@ -1729,6 +1898,15 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                 }
                 Some(message::Union::Hash(hash)) => {
+                    #[cfg(feature = "hoen-mailbox")]
+                    {
+                        let _ = hash;
+                        if let Err(error) = self.send_hoen_login(peer).await {
+                            self.handler.on_error(&error.to_string());
+                            return false;
+                        }
+                    }
+                    #[cfg(not(feature = "hoen-mailbox"))]
                     if !self
                         .handler
                         .handle_hash(
@@ -1754,6 +1932,23 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                     }
                     Some(login_response::Union::PeerInfo(pi)) => {
+                        #[cfg(feature = "hoen-mailbox")]
+                        {
+                            let allowed = match self.hoen.as_ref() {
+                                Some(connection) if connection.login_sent && (self.is_connected || connection.proof.is_some()) =>
+                                    matches!(time::timeout(Duration::from_secs(5), connection.guard.recheck()).await, Ok(Ok(()))),
+                                _ => false,
+                            };
+                            if !allowed || !self.hoen_current() {
+                                self.handler.on_error("Mailbox session was not authorized on the approved network");
+                                return false;
+                            }
+                            if !self.is_connected {
+                                if let Some(connection) = self.hoen.as_mut() { connection.proof = None; }
+                                self.handler.connection_round_state.lock().unwrap().set_connected();
+                                self.handler.set_connection_type(true, true, "Hoen TCP");
+                            }
+                        }
                         let peer_version = pi.version.clone();
                         let peer_platform = pi.platform.clone();
                         self.set_peer_info(&pi);
@@ -3149,6 +3344,38 @@ struct VideoThread {
     frame_count: Arc<RwLock<usize>>,
     discard_queue: Arc<RwLock<bool>>,
     fps_control: FpsControl,
+}
+
+#[cfg(all(test, feature = "hoen-mailbox"))]
+mod hoen_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_tiny_and_malformed_frames_before_liveness() {
+        assert!(!hoen_frame_valid(&[]));
+        assert!(!hoen_frame_valid(&[0]));
+        assert!(!hoen_frame_valid(&[0xff, 0xff]));
+        // Unknown protobuf field 100 is well-formed but has no Message union.
+        assert!(!hoen_frame_valid(&[0xa0, 0x06, 0x01]));
+        let mut msg = Message::new();
+        msg.set_clipboard(Clipboard { content: b"text".to_vec().into(), ..Default::default() });
+        assert!(hoen_frame_valid(&msg.write_to_bytes().unwrap()));
+    }
+
+    #[test]
+    fn forbids_injected_login_and_switch_controls_but_keeps_clipboard() {
+        let mut msg = Message::new();
+        msg.set_login_request(LoginRequest::new());
+        assert!(hoen_forbids_session_control(&msg));
+        let mut misc = Misc::new();
+        misc.set_switch_back(SwitchBack::new());
+        msg.set_misc(misc);
+        assert!(hoen_forbids_session_control(&msg));
+        msg.set_clipboard(Clipboard::new());
+        assert!(!hoen_forbids_session_control(&msg));
+        msg.set_cliprdr(Cliprdr::new());
+        assert!(!hoen_forbids_session_control(&msg));
+    }
 }
 
 impl Drop for VideoThread {

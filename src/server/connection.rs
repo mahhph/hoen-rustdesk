@@ -374,6 +374,16 @@ pub struct Connection {
     authorized: bool,
     // The place among the unauthorized connections; given back at authorization.
     unauthorized_id: Option<UnauthorizedID>,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen: Option<Arc<crate::hoen::host::HostContext>>,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen_grant: Option<hoen_mailbox_auth::mailbox::ConsumedGrant>,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen_history_id: Option<uuid::Uuid>,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen_heartbeat: Option<Instant>,
+    #[cfg(feature = "hoen-mailbox")]
+    hoen_terminal: Option<hbb_common::tokio::task::JoinHandle<()>>,
     require_2fa: Option<totp_rs::TOTP>,
     awaiting_2fa: bool,
     trusted_device: Option<crate::trusted_devices::host::Attempt>,
@@ -535,7 +545,11 @@ impl Connection {
         let super::ConnectionMeta {
             control_permissions,
             controlled_context,
+            #[cfg(feature = "hoen-mailbox")]
+            hoen,
         } = meta;
+        #[cfg(feature = "hoen-mailbox")]
+        if hoen.as_ref().map_or(true, |context| !context.guard.is_current()) || crate::hoen::host::disabled() { return; }
         // Android is not supported yet, so we always set control_permissions to None.
         #[cfg(target_os = "android")]
         let control_permissions = None;
@@ -591,6 +605,16 @@ impl Connection {
             tx_to_cm,
             authorized: false,
             unauthorized_id: Some(unauthorized),
+            #[cfg(feature = "hoen-mailbox")]
+            hoen,
+            #[cfg(feature = "hoen-mailbox")]
+            hoen_grant: None,
+            #[cfg(feature = "hoen-mailbox")]
+            hoen_history_id: None,
+            #[cfg(feature = "hoen-mailbox")]
+            hoen_heartbeat: None,
+            #[cfg(feature = "hoen-mailbox")]
+            hoen_terminal: None,
             keyboard: Self::permission(keys::OPTION_ENABLE_KEYBOARD, &control_permissions),
             clipboard: Self::permission(keys::OPTION_ENABLE_CLIPBOARD, &control_permissions),
             audio: Self::permission(keys::OPTION_ENABLE_AUDIO, &control_permissions),
@@ -703,6 +727,17 @@ impl Connection {
         let mut test_delay_timer =
             crate::rustdesk_interval(time::interval_at(Instant::now(), TEST_DELAY_TIMEOUT));
         let mut last_recv_time = Instant::now();
+        #[cfg(feature = "hoen-mailbox")]
+        let mut hoen_seen = false;
+        #[cfg(feature = "hoen-mailbox")]
+        let mut hoen_network_changes = conn.hoen.as_ref().map(|context| context.guard.subscribe());
+        #[cfg(not(feature = "hoen-mailbox"))]
+        let mut hoen_network_changes: Option<tokio::sync::watch::Receiver<()>> = None;
+        #[cfg(feature = "hoen-mailbox")]
+        if conn.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) {
+            conn.on_close("network error", false).await;
+            return;
+        }
         let started = Instant::now();
 
         // The connection type is not known until the login request arrives;
@@ -739,6 +774,15 @@ impl Connection {
             tokio::select! {
                 // biased; // video has higher priority // causing test_delay_timer failed while transferring big file
 
+                _ = async {
+                    match hoen_network_changes.as_mut() {
+                        Some(changes) => { let _ = changes.changed().await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    conn.on_close("network error", false).await;
+                    break;
+                }
                 // Both end an unauthorized connection at once, not on the next timer tick:
                 // told to go to make room, or past the grace for its authorization. Neither
                 // fires once the connection has authorized.
@@ -1030,8 +1074,30 @@ impl Connection {
                                 break;
                             },
                             Ok(bytes) => {
-                                last_recv_time = Instant::now();
-                                conn.session_last_recv_time.as_mut().map(|t| *t.lock().unwrap() = Instant::now());
+                                #[cfg(feature = "hoen-mailbox")]
+                                if conn.hoen.is_some() {
+                                    if conn.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) {
+                                        conn.on_close("network error", false).await;
+                                        break;
+                                    }
+                                    let valid = crate::hoen::transport::validate_decrypted_frame(&bytes).is_ok()
+                                        && Message::parse_from_bytes(&bytes).map_or(false, |m| m.union.is_some());
+                                    if !valid {
+                                        conn.on_close("protocol error", false).await;
+                                        break;
+                                    }
+                                    hoen_seen = true;
+                                }
+                                #[cfg(feature = "hoen-mailbox")]
+                                if conn.hoen.is_none() {
+                                    last_recv_time = Instant::now();
+                                    conn.session_last_recv_time.as_mut().map(|t| *t.lock().unwrap() = Instant::now());
+                                }
+                                #[cfg(not(feature = "hoen-mailbox"))]
+                                {
+                                    last_recv_time = Instant::now();
+                                    conn.session_last_recv_time.as_mut().map(|t| *t.lock().unwrap() = Instant::now());
+                                }
                                 if let Ok(msg_in) = Message::parse_from_bytes(&bytes) {
                                     if !conn.on_message(msg_in).await {
                                         break;
@@ -1170,6 +1236,19 @@ impl Connection {
                     }
                 }
                 _ = second_timer.tick() => {
+                    #[cfg(feature = "hoen-mailbox")]
+                    if let Some(context) = conn.hoen.clone() {
+                        if !matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) {
+                            conn.on_close("network error", false).await;
+                            break;
+                        }
+                        if hoen_seen {
+                            hoen_seen = false;
+                            last_recv_time = Instant::now();
+                            conn.session_last_recv_time.as_mut().map(|t| *t.lock().unwrap() = Instant::now());
+                        }
+                        conn.hoen_record_heartbeat().await;
+                    }
                     #[cfg(windows)]
                     conn.portable_check();
                     raii::AuthedConnID::check_wake_lock_on_setting_changed();
@@ -1247,6 +1326,10 @@ impl Connection {
             try_stop_record_cursor_pos();
         }
         conn.on_close("End", true).await;
+        #[cfg(feature = "hoen-mailbox")]
+        if let Some(task) = conn.hoen_terminal.take() {
+            let _ = time::timeout(Duration::from_secs(3), task).await;
+        }
         log::info!("#{} connection loop exited", id);
     }
 
@@ -1509,11 +1592,15 @@ impl Connection {
 
     async fn on_open(&mut self, addr: SocketAddr) -> bool {
         log::debug!("#{} Connection opened from {}.", self.inner.id, addr);
-        if !self.check_whitelist(&addr).await {
+        #[cfg(feature = "hoen-mailbox")]
+        let is_hoen = self.hoen.is_some();
+        #[cfg(not(feature = "hoen-mailbox"))]
+        let is_hoen = false;
+        if !is_hoen && !self.check_whitelist(&addr).await {
             return false;
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if crate::is_server() && Config::get_option("allow-only-conn-window-open") == "Y" {
+        if !is_hoen && crate::is_server() && Config::get_option("allow-only-conn-window-open") == "Y" {
             if !crate::check_process("", !crate::platform::is_root()) {
                 self.send_login_error("The main window is not open").await;
                 return false;
@@ -1523,7 +1610,7 @@ impl Connection {
         let mut msg_out = Message::new();
         msg_out.set_hash(self.hash.clone());
         self.send(msg_out).await;
-        self.get_api_server();
+        if !is_hoen { self.get_api_server(); }
         let mut audit = json!({
             "ip": addr.ip(),
             "action": "new",
@@ -1854,6 +1941,8 @@ impl Connection {
     // Returns whether this connection should be kept alive.
     // `true` does not necessarily mean authorization succeeded (e.g. REQUIRE_2FA case).
     async fn send_logon_response_and_keep_alive(&mut self) -> bool {
+        #[cfg(feature = "hoen-mailbox")]
+        if self.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) || self.hoen_grant.is_none() || crate::hoen::host::disabled() { return false; }
         if self.authorized {
             return true;
         }
@@ -1914,6 +2003,9 @@ impl Connection {
         // One-time means gone once it has let a peer in, not once that peer
         // leaves. This session's later logins come in on the password the
         // session remembers, so they are not affected.
+        #[cfg(feature = "hoen-mailbox")]
+        if self.hoen.is_none() { password::update_temporary_password(); }
+        #[cfg(not(feature = "hoen-mailbox"))]
         password::update_temporary_password();
         // Releases the budget `check_id_whitelist` charges against this address: only a peer
         // that got this far proved more than a self-reported id.
@@ -2193,6 +2285,12 @@ impl Connection {
         }
         if !self.enroll_trusted_device(&mut res).await {
             return false;
+        }
+        #[cfg(feature = "hoen-mailbox")]
+        if self.hoen.is_some() {
+            if !self.is_remote() || !res.has_peer_info() || !self.hoen_begin_history().await {
+                return false;
+            }
         }
         let mut msg_out = Message::new();
         msg_out.set_login_response(res);
@@ -2889,10 +2987,112 @@ impl Connection {
         }
     }
 
+    #[cfg(feature = "hoen-mailbox")]
+    async fn hoen_login(&mut self, mut lr: LoginRequest) -> bool {
+        // A Hoen connection is remote desktop only; no fallback to legacy approval paths.
+        if crate::hoen::host::disabled() || lr.union.is_some() || !self.check_login_scope(&lr).await { return false; }
+        let Some(proof) = lr.hoen_proof.take() else { return false; };
+        let Some(context) = self.hoen.clone() else { return false; };
+        let verified = hbb_common::tokio::select! {
+            result = time::timeout(Duration::from_secs(20), context.guard.authenticate(&context.runtime.mailbox, &context.runtime.identity, &proof)) => result,
+            _ = unauthorized_evicted(&self.unauthorized_id) => return false,
+        };
+        let grant = match verified { Ok(Ok(grant)) => grant, _ => return false };
+        if crate::hoen::host::disabled() { return false; }
+        // Never retain bearer proof or password material in the cloned login/session state.
+        lr.password.clear();
+        lr.trusted_device_v2_token.clear();
+        lr.os_login = Default::default();
+        self.hoen_grant = Some(grant);
+        self.require_2fa = None;
+        self.trusted_device = None;
+        self.handle_login_request_without_validation(&lr).await;
+        if !self.check_privacy_mode_on().await { return false; }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        self.try_start_cm_ipc();
+        if !self.send_logon_response_and_keep_alive().await { return false; }
+        self.try_start_cm(lr.my_id, lr.my_name, self.authorized);
+        true
+    }
+
+    #[cfg(feature = "hoen-mailbox")]
+    async fn hoen_begin_history(&mut self) -> bool {
+        let Some(context) = self.hoen.as_ref() else { return false; };
+        let Some(history) = context.runtime.history.as_ref() else { return false; };
+        let Some(grant) = self.hoen_grant.as_ref() else { return false; };
+        if !matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) { return false; }
+        let start = match crate::hoen::history_worker::SessionStart::new(grant) {
+            Ok(start) => start,
+            Err(_) => return false,
+        };
+        match history.begin(&start).await {
+            Ok(id) => {
+                self.hoen_history_id = Some(id);
+                self.hoen_heartbeat = Some(Instant::now());
+                !crate::hoen::host::disabled() && matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) && !crate::hoen::host::disabled() && context.guard.is_current()
+            }
+            Err(crate::hoen::history_worker::WorkerError::Unconfirmed) => {
+                let history = history.clone();
+                let id = start.session_id();
+                hbb_common::tokio::spawn(async move {
+                    let intent = crate::hoen::history_worker::HistoryIntent::failed(id, hoen_mailbox_history::Reason::HostError);
+                    if history.record(&intent).await.is_err() { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history admission outcome unavailable"); }
+                });
+                hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history admission unconfirmed; connection refused");
+                false
+            }
+            Err(_) => { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history unavailable; connection refused"); false }
+        }
+    }
+
+    #[cfg(feature = "hoen-mailbox")]
+    async fn hoen_record_heartbeat(&mut self) {
+        let (Some(context), Some(id), Some(last)) = (&self.hoen, self.hoen_history_id, self.hoen_heartbeat) else { return; };
+        if last.elapsed() < Duration::from_secs(60) { return; }
+        let Some(history) = context.runtime.history.clone() else { return; };
+        self.hoen_heartbeat = Some(Instant::now());
+        hbb_common::tokio::spawn(async move {
+            let intent = crate::hoen::history_worker::HistoryIntent::heartbeat(id);
+            if history.record(&intent).await.is_err() { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history heartbeat unavailable"); }
+        });
+    }
+
+    #[cfg(feature = "hoen-mailbox")]
+    async fn hoen_end_history(&mut self, reason: &str) {
+        let (Some(context), Some(id)) = (&self.hoen, self.hoen_history_id.take()) else { return; };
+        let Some(history) = context.runtime.history.clone() else { return; };
+        let (failed, reason) = match reason {
+            "Peer close" => (false, hoen_mailbox_history::Reason::UserDisconnect),
+            "network error" | "Reset by the peer" => (true, hoen_mailbox_history::Reason::NetworkError),
+            "stop service" => (false, hoen_mailbox_history::Reason::Cancelled),
+            "protocol error" => (true, hoen_mailbox_history::Reason::ProtocolError),
+            "Timeout" => (true, hoen_mailbox_history::Reason::Timeout),
+            "End" => (false, hoen_mailbox_history::Reason::Normal),
+            _ => (true, hoen_mailbox_history::Reason::HostError),
+        };
+        self.hoen_terminal = Some(hbb_common::tokio::spawn(async move {
+            let intent = if failed { crate::hoen::history_worker::HistoryIntent::failed(id, reason) }
+                else { crate::hoen::history_worker::HistoryIntent::ended(id, reason) };
+            loop {
+                match history.record(&intent).await {
+                    Ok(()) => break,
+                    Err(crate::hoen::history_worker::WorkerError::QueueFull | crate::hoen::history_worker::WorkerError::Unconfirmed) => time::sleep(Duration::from_secs(1)).await,
+                    Err(_) => { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history termination unavailable"); break; }
+                }
+            }
+        }));
+    }
+
     async fn on_message(&mut self, msg: Message) -> bool {
         if let Some(message::Union::Misc(misc)) = &msg.union {
             // Move the CloseReason forward, as this message needs to be received when unauthorized, especially for kcp.
             if let Some(misc::Union::CloseReason(s)) = &misc.union {
+                #[cfg(feature = "hoen-mailbox")]
+                if self.hoen.is_some() {
+                    self.on_close("Peer close", true).await;
+                    raii::AuthedConnID::check_remove_session(self.inner.id(), self.session_key());
+                    return false;
+                }
                 log::info!("receive close reason: {}", s);
                 self.on_close("Peer close", true).await;
                 raii::AuthedConnID::check_remove_session(self.inner.id(), self.session_key());
@@ -2900,7 +3100,12 @@ impl Connection {
             }
         }
         if self.authorized {
-            if matches!(msg.union.as_ref(), Some(message::Union::LoginRequest(_))) {
+            if let Some(message::Union::LoginRequest(lr)) = msg.union.as_ref() {
+                #[cfg(feature = "hoen-mailbox")]
+                if self.hoen.is_some() {
+                    return self.hoen_grant.is_some() && lr.union.is_none()
+                        && self.login_scope == Some(Self::login_scope_digest(lr));
+                }
                 return true;
             }
             if let Some(message) = self.authorized_scope_violation(&msg) {
@@ -2909,6 +3114,8 @@ impl Connection {
         }
         // After handling CloseReason messages, proceed to process other message types
         if let Some(message::Union::LoginRequest(lr)) = msg.union {
+            #[cfg(feature = "hoen-mailbox")]
+            if self.hoen.is_some() && !self.authorized { return self.hoen_login(lr).await; }
             if !self.check_login_scope(&lr).await {
                 return false;
             }
@@ -3150,6 +3357,8 @@ impl Connection {
                 }
             }
         } else if let Some(message::Union::SwitchSidesResponse(_s)) = msg.union {
+            #[cfg(feature = "hoen-mailbox")]
+            if self.hoen.is_some() { return false; }
             #[cfg(feature = "flutter")]
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some(lr) = _s.lr.clone().take() {
@@ -3999,6 +4208,8 @@ impl Connection {
                     #[cfg(feature = "flutter")]
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     Some(misc::Union::SwitchSidesRequest(s)) => {
+                        #[cfg(feature = "hoen-mailbox")]
+                        if self.hoen.is_some() { return false; }
                         if let Ok(uuid) = uuid::Uuid::from_slice(&s.uuid.to_vec()[..]) {
                             if crate::server::insert_pending_switch_sides_uuid(
                                 self.lr.my_id.clone(),
@@ -5310,6 +5521,8 @@ impl Connection {
             return;
         }
         self.closed = true;
+        #[cfg(feature = "hoen-mailbox")]
+        self.hoen_end_history(reason).await;
         // If voice A,B -> C, and A,B has voice call
         // B disconnects, C will reset the voice call input.
         //
@@ -7262,9 +7475,20 @@ mod test {
         (served, controller, addr)
     }
 
+    #[cfg(feature = "hoen-mailbox")]
+    #[tokio::test]
+    async fn hoen_mode_rejects_legacy_connection_before_handshake() {
+        let (served, _controller, addr) = stalled_incoming().await;
+        let result = crate::server::create_tcp_connection(
+            crate::server::new_for_test(), served, addr, true, Default::default()
+        ).await;
+        assert!(result.is_err());
+    }
+
     // Live connections, not bookkeeping: with the limit reached by connections stalled in the
     // handshake, one more arrival is refused and the oldest handshake is ended at once, not on
     // a timer tick, so the live count never exceeds the limit and a place opens only then.
+    #[cfg(not(feature = "hoen-mailbox"))]
     #[tokio::test]
     async fn test_unauthorized_limit_bounds_live_handshakes() {
         let _serial = UNAUTHORIZED_TESTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -7326,6 +7550,7 @@ mod test {
     // The cap is on before the identity handshake reads. A header declaring one byte over it,
     // written to the wire as the codec would read it, ends the handshake on the header alone -
     // the payload is neither waited for nor read - and releases the place the connection held.
+    #[cfg(not(feature = "hoen-mailbox"))]
     #[tokio::test]
     async fn test_unauthorized_frame_is_refused_on_its_header() {
         use hbb_common::tokio::io::AsyncWriteExt;

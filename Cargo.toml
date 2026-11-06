@@ -21,7 +21,7 @@ name = "service"
 path = "src/service.rs"
 
 [features]
-hoen-mailbox = ["dep:hoen-mailbox-auth", "dep:hoen-mailbox-history", "windows/Win32_NetworkManagement_IpHelper", "windows/Win32_NetworkManagement_Ndis", "windows/Win32_Networking_WinSock", "windows/Win32_Networking_NetworkListManager", "windows/Win32_Security_Cryptography"]
+hoen-mailbox = ["dep:hoen-mailbox-auth", "dep:hoen-mailbox-history", "dep:windows-core", "windows/Win32_NetworkManagement_IpHelper", "windows/Win32_NetworkManagement_Ndis", "windows/Win32_NetworkManagement_WiFi", "windows/Win32_Networking_WinSock", "windows/Win32_Networking_NetworkListManager", "windows/Win32_Security_Cryptography"]
 inline = []
 use_samplerate = ["samplerate", "libsamplerate-sys"]
 use_rubato = ["rubato"]
@@ -114,6 +114,7 @@ system_shutdown = "4.0"
 qrcode-generator = "4.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+windows-core = { version = "0.61", optional = true }
 winapi = { version = "0.3", features = [
     "winuser",
     "wincrypt",

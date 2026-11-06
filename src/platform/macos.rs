@@ -224,6 +224,9 @@ pub fn install_service() -> bool {
 // No need to merge the existing dup code, because the code in these two functions are too critical.
 // New code should be written in a common function.
 pub fn is_installed_daemon(prompt: bool) -> bool {
+    if cfg!(feature = "hoen-mailbox") && prompt {
+        return false;
+    }
     let daemon = format!("{}_service.plist", crate::get_full_name());
     let agent = format!("{}_server.plist", crate::get_full_name());
     let agent_plist_file = format!("/Library/LaunchAgents/{}", agent);
@@ -395,6 +398,9 @@ fn write_plist_atomically(path: &str, body: &str) -> ResultType<()> {
 }
 
 pub fn write_plists() -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock service installation is unavailable in Hoen mode");
+    }
     let daemon_plist_path = format!(
         "/Library/LaunchDaemons/com.carriez.{}_service.plist",
         crate::get_app_name()
@@ -422,6 +428,9 @@ pub fn write_plists() -> ResultType<()> {
 }
 
 pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
+    if cfg!(feature = "hoen-mailbox") {
+        return false;
+    }
     // to-do: do together with win/linux about refactory start/stop service
     if !is_installed_daemon(false) {
         return false;
@@ -858,6 +867,7 @@ pub fn lock_screen() {
 pub fn start_os_service() {
     log::info!("Username: {}", crate::username());
     // Silent auto-update — runs as root via LaunchDaemon, no osascript dialog needed
+    #[cfg(not(feature = "hoen-mailbox"))]
     crate::updater::start_auto_update_macos();
     if let Err(err) = crate::ipc::start("_service") {
         log::error!("Failed to start ipc_service: {}", err);
@@ -947,6 +957,9 @@ pub fn quit_gui() {
 }
 
 pub fn update_me() -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let cmd = std::env::current_exe()?;
     // RustDesk.app/Contents/MacOS/RustDesk
     let app_dir = cmd
@@ -965,6 +978,9 @@ fn update_me_from_app_dir(app_dir: String) -> ResultType<()> {
 }
 
 fn update_me_from_source(update_source: UpdateSource) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let app_name = crate::get_app_name();
     validate_install_app_name(&app_name)?;
     let is_installed_daemon = is_installed_daemon(false);
@@ -1078,6 +1094,9 @@ fi
 }
 
 pub fn update_from_dmg(dmg_path: &str) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let update_temp_dir = get_update_temp_dir_string();
     println!("Starting update from DMG: {}", dmg_path);
     let update_result = (|| {
@@ -1100,6 +1119,9 @@ pub fn update_to_verified_dmg(
     expected_sha256: &str,
     expected_size: Option<u64>,
 ) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let verified_dmg = copy_and_verify_dmg_file(file, expected_sha256, expected_size)?;
     update_from_verified_dmg(&verified_dmg)?;
     // Remove the private DMG copy before this process exits.
@@ -1209,6 +1231,9 @@ fn verify_update_app_identity(installed: &Path, candidate: &Path) -> ResultType<
 /// Performs a silent update from a DMG file without any osascript dialog.
 /// Must be called from a process running as root (e.g. the service binary).
 pub fn update_from_dmg_as_root(dmg_path: &str, expected_version: &str) -> ResultType<()> {
+    if cfg!(feature = "hoen-mailbox") {
+        bail!("Stock updates are unavailable in Hoen mode");
+    }
     let app_name = crate::get_app_name();
     validate_install_app_name(&app_name)?;
     let app_bundle = format!("/Applications/{}.app", app_name);
@@ -2213,5 +2238,21 @@ mod update_tests {
         }
 
         std::fs::remove_dir_all(test_dir).unwrap();
+    }
+}
+
+#[cfg(all(test, feature = "hoen-mailbox"))]
+mod hoen_install_guards {
+    use super::*;
+
+    #[test]
+    fn stock_install_uninstall_and_update_are_disabled() {
+        assert!(!is_installed_daemon(true));
+        assert!(!uninstall_service(false, false));
+        assert!(write_plists().is_err());
+        assert!(update_me().is_err());
+        assert!(update_from_dmg("unused").is_err());
+        assert!(update_to_verified_dmg("unused", "unused", None).is_err());
+        assert!(update_from_dmg_as_root("unused", "unused").is_err());
     }
 }

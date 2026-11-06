@@ -4,12 +4,13 @@ use hbb_common::{
     ResultType,
 };
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub(crate) fn command() -> Option<ResultType<()>> {
     use super::credentials::{Purpose, Secret, MAX_SECRET_BYTES};
     use std::io::Read;
     let mut args = std::env::args().skip(1);
-    let purpose = match args.next().as_deref() {
+    let command = args.next();
+    let purpose = match command.as_deref() {
         Some("--hoen-import-viewer") => Purpose::Viewer,
         Some("--hoen-import-host") => Purpose::HostService,
         _ => return None,
@@ -28,7 +29,7 @@ pub(crate) fn command() -> Option<ResultType<()>> {
     })())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub(crate) fn command() -> Option<ResultType<()>> {
     None
 }

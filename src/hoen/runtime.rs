@@ -337,7 +337,39 @@ pub(crate) fn import_enrollment(
         .and_then(|store| store.write_new(secret))
         .map_err(|_| anyhow!("cannot save enrollment for this Windows identity"))
 }
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn load(purpose: Purpose) -> ResultType<(Enrollment, PathBuf)> {
+    use super::credentials::MacStore;
+    let store = MacStore::for_user(purpose)
+        .map_err(|_| anyhow!("user Keychain unavailable for mailbox enrollment"))?;
+    let secret = store.read().map_err(|_| anyhow!("protected mailbox enrollment unavailable"))?;
+    let enrollment = parse(secret.expose())?;
+    let history = if purpose == Purpose::HostService {
+        let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
+        super::macos_private_dir::history(std::path::Path::new(&home))?
+    } else {
+        PathBuf::new()
+    };
+    Ok((enrollment, history))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn import_enrollment(
+    purpose: Purpose,
+    secret: &super::credentials::Secret,
+) -> ResultType<()> {
+    use super::credentials::MacStore;
+    let _validated = parse(secret.expose())?;
+    let store = MacStore::for_user(purpose)
+        .map_err(|_| anyhow!("user Keychain unavailable for mailbox enrollment"))?;
+    if purpose == Purpose::HostService {
+        let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
+        super::macos_private_dir::history(std::path::Path::new(&home))?;
+    }
+    store.write(secret).map_err(|_| anyhow!("cannot save protected mailbox enrollment"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
     bail!("protected mailbox enrollment is not implemented on this platform");
 }

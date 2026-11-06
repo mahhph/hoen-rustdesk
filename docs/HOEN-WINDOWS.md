@@ -1,5 +1,14 @@
 # Hoen Windows host: build and integration notes
 
+Current seq210 integration supersedes earlier network policy and readiness notes below.
+The native TCP transport checks its configured local binding; adapter/network IDs,
+SSID, interface type, OS category and peer route are not authorization checks.
+Mac retains Keychain enrollment and the development app namespace, but no longer
+queries Wi-Fi identifiers or automatically selects a pinned-network address.
+Network notifications may terminate a session; reconnection requires fresh proof.
+The configured bind address does not automatically follow DHCP. Relay is unimplemented.
+Earlier seq191/193 admission descriptions are historical and superseded.
+
 For a component checklist and repeatable local build shell, see [Windows x64 build setup](WINDOWS-BUILD-SETUP.md).
 
 Inspection applies to checkout `cbde394`; no build, executable, installation, listener, or unattended session was tested here. The local `libs/hbb_common` submodule is initialized at `fae47e024dd83cef6aaecde0aa7d11731df11649`. On this machine the user-local Rust 1.75.0 x64 MSVC toolchain is installed and verified (`rustc +1.75.0 --version`); the stable default remains unchanged. Rustup attempted a self-update and reported a pre-existing `cargo-miri.exe` link conflict after installing the toolchain. Rust and Cargo are available, Visual Studio's installer reports VC x86/x64 tools version 17.14, `VCPKG_ROOT` is unset and Clang and protoc were not found on PATH. Visual Studio provides CMake and Ninja. Python and Flutter were subsequently installed under `%LOCALAPPDATA%\HoenBuildTools` and are available when their directories are added to the current shell PATH; WindowsApps Python aliases are not interpreters. PATH absence does not prove a tool is absent elsewhere. Do not put credentials in build commands, logs, or this document.
@@ -98,6 +107,21 @@ The tests cover real loopback TCP encryption and matching channel bindings, host
 The new native modules are not called by the existing desktop session loops yet. Remaining gates include enrollment and protected configuration provisioning, viewer/host startup hooks, final admission and small-frame/liveness checks, network-change teardown, lifecycle history hooks, live mailbox API reconciliation/deployment, installation/rollback and two-machine acceptance. No host service or firewall rule was installed. Area51 has begun the separately authorized matching-baseline build setup; its comparison timings remain pending.
 
 Regression surface at this checkpoint: the root Cargo manifests/lock add optional dependencies and OS bindings; `src/lib.rs` adds a feature-gated module; client-only protobuf definitions add optional fields; Windows/Mac CI commands include the feature tests. Existing desktop login, capture, input, clipboard, and service runtime paths are unchanged. No `hbb_common` submodule change was made.
+
+## Superseding direct-LAN policy (seq191)
+
+Earlier approved-home-interface/network language above is superseded: permit
+any same LAN over physical Wi-Fi or Ethernet without SSID, network GUID,
+named-network or adapter pins and without requiring a Windows Private profile.
+Do not change MeshMonkey or another network profile for Hoen authorization;
+seq189's request is superseded. Keep actual socket/interface and on-link route
+checks with cryptographic mailbox identity and single-use grants. No public
+rendezvous/relay, router exposure, password or manual-approval fallback is
+permitted. Firewall provisioning remains a separate reviewed integration step.
+VPN transport may be added under a separately reviewed future policy.
+Seq193 published `b9ade1684` and `d750e367e`; their code/build changes have
+been reviewed and integrated locally. Windows runtime and two-machine acceptance
+remain unverified on this Mac. See HOEN-MAC.md for integration status.
 
 ### Native host/viewer hook checkpoint
 

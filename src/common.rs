@@ -125,6 +125,10 @@ pub fn global_init() -> bool {
     if !crate::hoen::bootstrap::initialize() {
         return false;
     }
+    #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+    if !crate::hoen::macos_namespace::initialize() {
+        return false;
+    }
     #[cfg(all(target_os = "linux", feature = "drm"))]
     crate::platform::linux::dispatch_wayland_display_probe();
     #[cfg(target_os = "linux")]
@@ -2629,13 +2633,13 @@ pub fn read_custom_client(config: &str) {
         return;
     };
 
-    #[cfg(not(all(windows, feature = "hoen-mailbox")))]
+    #[cfg(not(all(any(windows, target_os = "macos"), feature = "hoen-mailbox")))]
     if let Some(app_name) = data.remove("app-name") {
         if let Some(app_name) = app_name.as_str() {
             *config::APP_NAME.write().unwrap() = app_name.to_owned();
         }
     }
-    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    #[cfg(all(any(windows, target_os = "macos"), feature = "hoen-mailbox"))]
     let _ = data.remove("app-name");
 
     let mut map_display_settings = HashMap::new();

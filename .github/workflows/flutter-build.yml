@@ -1130,8 +1130,10 @@ jobs:
           # The build's own features, so the tests see the code that ships. MACOSX_DEPLOYMENT_TARGET
           # comes from the build step's export.
           FEATURES=$(./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }} --print-features)
+          python3 -m unittest scripts/test_build_hoen_mac_dev.py
           cargo test --locked --release --lib --features "$FEATURES"
           cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" hoen
+          cargo test --locked --release --lib --features "$FEATURES,hoen-mac-dev" hoen
           # Opt-in, and its macOS tests run nowhere else.
           cargo test --locked --release -p clipboard --features unix-file-copy-paste
 

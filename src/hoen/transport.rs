@@ -368,3 +368,30 @@ mod service_tests {
         assert!(checked_service_proof(bad, &public.0, &binding).is_err());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hbb_common::tokio::net::TcpListener;
+
+    #[hbb_common::tokio::test]
+    async fn mismatched_binding_closes_before_host_greeting() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (client, accepted) =
+            hbb_common::tokio::join!(TcpStream::connect(address), listener.accept(),);
+        let (socket, _) = accepted.unwrap();
+        let (_, signing_key) = sign::gen_keypair();
+        let policy = network::Policy {
+            local_address: "127.0.0.2".parse().unwrap(),
+        };
+        let monitor = Arc::new(NetworkMonitor::start().await.unwrap());
+        assert!(Transport::accept(socket, policy, &signing_key, monitor)
+            .await
+            .is_err());
+
+        let mut peer = Stream::from(client.unwrap(), address);
+        let received = timeout(Duration::from_secs(1), peer.next()).await.unwrap();
+        assert!(!matches!(received, Some(Ok(_))));
+    }
+}

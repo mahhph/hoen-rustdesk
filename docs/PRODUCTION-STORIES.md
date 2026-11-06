@@ -22,6 +22,8 @@ Acceptance criteria:
 
 First increment: a separately invocable, tested firewall lifecycle helper. Integration into the full installer and a fresh-machine trial remain required before closing the story.
 
+Evidence (2026-11-06): `scripts/remote-desktop-firewall.ps1` implements explicit-port Validate/Configure/Remove. `scripts/test-remote-desktop-firewall.ps1` passed mocked lifecycle/filter checks on Windows PowerShell 5.1; the existing installer process/stop guards also passed. Native filter representations were checked read-only against Lenovo's existing rule. No live rule or service was changed, and no fresh-machine trial is claimed. Next step: retain the approved listener port in protected installation metadata so installer lifecycle actions can call the helper without reading encrypted service credentials.
+
 ## PRD-02 — Upgrade and rollback without losing identity
 
 **Status:** Ready. **Priority:** P0. **Depends on:** PRD-01.

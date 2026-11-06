@@ -112,6 +112,23 @@ function Assert-NoServiceDependencies {
         finally { foreach ($dependency in $dependencies) { $dependency.Dispose() } }
     } finally { $controller.Dispose() }
 }
+function Assert-NoPayloadProcesses {
+    # SCM Stopped does not prove that an orphaned host or the GUI has exited.
+    # Do not kill processes here, including unrelated stock RustDesk instances.
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='rustdesk.exe'" -ErrorAction Stop)) {
+        if ([string]::IsNullOrWhiteSpace($process.ExecutablePath)) {
+            throw 'Cannot verify a running desktop executable path; files were retained.'
+        }
+        if ([string]::Equals([IO.Path]::GetFullPath($process.ExecutablePath), $binary, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The installed client or host is still running; close it before rollback. Files were retained.'
+        }
+    }
+}
+function Assert-CleanServiceStop($Service) {
+    if ($Service.State -ne 'Stopped' -or $null -eq $Service.ExitCode -or $Service.ExitCode -ne 0 -or $null -eq $Service.ServiceSpecificExitCode -or $Service.ServiceSpecificExitCode -ne 0) {
+        throw 'Service shutdown was not confirmed successful; installed files were retained.'
+    }
+}
 function Get-VerifiedService {
     $matches=@(Get-OwnService)
     if ($matches.Count -ne 1) { throw 'Expected exactly one matching service.' }
@@ -155,6 +172,7 @@ function Disable-AndStopOwnService {
         $current=Wait-OwnServiceState @('Stopped')
     } elseif ($current.State -eq 'Stop Pending') { $current=Wait-OwnServiceState @('Stopped') }
     if ($current.State -ne 'Stopped' -or $current.StartMode -ne 'Disabled') { throw 'Service did not reach stopped and disabled state.' }
+    Assert-CleanServiceStop $current
 }
 function Activate-OwnService {
     Assert-OwnService (Get-VerifiedService)
@@ -346,7 +364,10 @@ if ($Action -eq 'Deactivate') {
     Write-Output 'Service stopped and disabled. Installed files and enrollment data were retained.'
     return
 }
-Assert-OwnService (Get-VerifiedService)
+$stoppedService = Get-VerifiedService
+Assert-OwnService $stoppedService
+Assert-CleanServiceStop $stoppedService
+Assert-NoPayloadProcesses
 & $scExe delete $serviceName | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Service deletion failed; files were retained.' }
 $held[$held.Count-1].Dispose()

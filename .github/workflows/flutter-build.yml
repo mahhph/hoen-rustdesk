@@ -382,6 +382,8 @@ jobs:
           cargo test --locked --release --lib --features "$FEATURES"
           cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" hoen
           cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" ipc::ipc_windows::tests -- --test-threads=1
+          cargo test --locked --release --lib --features "$FEATURES,hoen-mailbox" windows_gui_survives_ipc_bind_failure
+          powershell -NoProfile -File scripts/test-remote-desktop-service-installer.ps1
           # Its Windows tests run nowhere else.
           cargo test --locked --release -p clipboard
 

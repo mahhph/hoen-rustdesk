@@ -94,6 +94,8 @@ use windows_service::{
     },
     service_control_handler::{self, ServiceControlHandlerResult},
 };
+#[cfg(feature = "hoen-mailbox")]
+use winapi::um::processthreadsapi::GetProcessId;
 use winreg::{enums::*, RegKey};
 
 mod acl;
@@ -662,14 +664,81 @@ extern "system" {
     fn BlockInput(v: BOOL) -> BOOL;
 }
 
+#[cfg(feature = "hoen-mailbox")]
+struct MailboxWorkerRetry {
+    next_check: Instant,
+    next_attempt: Instant,
+    started: Option<Instant>,
+    failures: u32,
+}
+
+#[cfg(feature = "hoen-mailbox")]
+impl MailboxWorkerRetry {
+    fn new(now: Instant) -> Self {
+        Self { next_check: now, next_attempt: now, started: None, failures: 0 }
+    }
+    fn check_due(&mut self, now: Instant) -> bool {
+        if now < self.next_check { return false; }
+        self.next_check = now + Duration::from_secs(1);
+        true
+    }
+    fn started(&mut self, now: Instant) { self.started = Some(now); }
+    fn observe_alive(&mut self, now: Instant) {
+        if self.started.map_or(false, |start| now.saturating_duration_since(start) >= Duration::from_secs(30)) {
+            self.failures = 0;
+        }
+    }
+    fn failed(&mut self, now: Instant) {
+        self.started = None;
+        let seconds = (1u64 << self.failures.min(5)).min(30);
+        self.failures = self.failures.saturating_add(1);
+        self.next_attempt = now + Duration::from_secs(seconds);
+    }
+    fn session_closed(&mut self, now: Instant) {
+        self.started = None;
+        self.next_attempt = now;
+    }
+}
+
+#[cfg(feature = "hoen-mailbox")]
+async fn close_owned_worker(process: HANDLE) -> ResultType<()> {
+    use std::os::windows::{fs::OpenOptionsExt, io::{AsRawHandle, IntoRawHandle}};
+    use windows::Win32::{
+        Foundation::HANDLE as PipeHandle,
+        Storage::FileSystem::{FILE_FLAG_OVERLAPPED, FILE_GENERIC_READ, FILE_WRITE_DATA, SECURITY_IDENTIFICATION},
+        System::Pipes::GetNamedPipeServerProcessId,
+    };
+    let expected = unsafe { GetProcessId(process) };
+    if expected == 0 { bail!("Owned worker process identity unavailable"); }
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ.0 | FILE_WRITE_DATA.0)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_OVERLAPPED.0)
+        .security_qos_flags(SECURITY_IDENTIFICATION.0)
+        .open(Config::ipc_path(""))?;
+    let mut peer = 0;
+    unsafe { GetNamedPipeServerProcessId(PipeHandle(file.as_raw_handle()), &mut peer) }?;
+    if peer != expected { bail!("Main IPC does not belong to the owned worker"); }
+    let client = unsafe { parity_tokio_ipc::ConnectionClient::from_raw_handle(file.into_raw_handle()) }?;
+    timeout(1_000, ipc::ConnectionTmpl::new(client).send(&ipc::Data::Close)).await??;
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
+    #[cfg(feature = "hoen-mailbox")]
+    let stop_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(feature = "hoen-mailbox")]
+    let stop_signal = stop_requested.clone();
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         log::info!("Got service control event: {:?}", control_event);
         match control_event {
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             ServiceControl::Stop | ServiceControl::Preshutdown | ServiceControl::Shutdown => {
-                send_close(crate::POSTFIX_SERVICE).ok();
+                #[cfg(feature = "hoen-mailbox")]
+                { stop_signal.store(true, Ordering::SeqCst); }
+                #[cfg(not(feature = "hoen-mailbox"))]
+                { send_close(crate::POSTFIX_SERVICE).ok(); }
                 ServiceControlHandlerResult::NoError
             }
             _ => ServiceControlHandlerResult::NotImplemented,
@@ -700,12 +769,24 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
 
     let mut session_id = unsafe { get_current_session(share_rdp()) };
     log::info!("session id {}", session_id);
+    #[cfg(not(feature = "hoen-mailbox"))]
     let mut h_process = launch_server(session_id, true).await.unwrap_or(NULL);
+    #[cfg(feature = "hoen-mailbox")]
+    let mut h_process: HANDLE = NULL;
+    #[cfg(feature = "hoen-mailbox")]
+    let mut worker_session: Option<u32> = None;
+    #[cfg(feature = "hoen-mailbox")]
+    let mut retry = MailboxWorkerRetry::new(Instant::now());
+    #[cfg(feature = "hoen-mailbox")]
+    let mut next_close = Instant::now();
     let mut incoming = ipc::new_listener(crate::POSTFIX_SERVICE).await?;
     #[cfg(feature = "hoen-mailbox")]
     let proof_slots = Arc::new(tokio::sync::Semaphore::new(4));
+    #[cfg(not(feature = "hoen-mailbox"))]
     let mut stored_usid = None;
     loop {
+        #[cfg(feature = "hoen-mailbox")]
+        if stop_requested.load(Ordering::SeqCst) { break; }
         let sids: Vec<_> = get_available_sessions(false)
             .iter()
             .map(|e| e.sid)
@@ -714,10 +795,50 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
             let current_active_session = unsafe { get_current_session(share_rdp()) };
             if session_id != current_active_session {
                 session_id = current_active_session;
+                #[cfg(not(feature = "hoen-mailbox"))]
+                {
                 // https://github.com/rustdesk/rustdesk/discussions/10039
                 let count = ipc::get_port_forward_session_count(1000).await.unwrap_or(0);
                 if count == 0 {
                     h_process = launch_server(session_id, true).await.unwrap_or(NULL);
+                }
+                }
+            }
+        }
+        #[cfg(feature = "hoen-mailbox")]
+        if retry.check_due(Instant::now()) {
+            let now = Instant::now();
+            if !h_process.is_null() {
+                let mut exit_code: DWORD = 0;
+                if unsafe { GetExitCodeProcess(h_process, &mut exit_code) } == TRUE {
+                    if exit_code == STILL_ACTIVE {
+                        retry.observe_alive(now);
+                        if worker_session != Some(session_id) && now >= next_close {
+                            if let Err(error) = close_owned_worker(h_process).await {
+                                log::debug!("Unable to request owned worker exit: {error}");
+                            }
+                            next_close = Instant::now() + Duration::from_secs(2);
+                        }
+                    } else if unsafe { CloseHandle(h_process) } == TRUE {
+                        h_process = NULL;
+                        if worker_session != Some(session_id) {
+                            retry.session_closed(now);
+                        } else {
+                            retry.failed(now);
+                        }
+                        worker_session = None;
+                    }
+                }
+                // A failed status query or handle close is unknown, not permission to spawn.
+            }
+            if h_process.is_null() && session_id != u32::MAX && now >= retry.next_attempt {
+                match launch_server(session_id, false).await {
+                    Ok(process) if !process.is_null() => {
+                        h_process = process;
+                        worker_session = Some(session_id);
+                        retry.started(Instant::now());
+                    }
+                    _ => retry.failed(Instant::now()),
                 }
             }
         }
@@ -798,9 +919,10 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                                             usid
                                         );
                                         session_id = usid;
-                                        stored_usid = Some(session_id);
-                                        h_process =
-                                            launch_server(session_id, true).await.unwrap_or(NULL);
+                                        #[cfg(not(feature = "hoen-mailbox"))]
+                                        { stored_usid = Some(session_id); }
+                                        #[cfg(not(feature = "hoen-mailbox"))]
+                                        { h_process = launch_server(session_id, true).await.unwrap_or(NULL); }
                                     }
                                 }
                             }
@@ -811,6 +933,7 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                 _ => {}
             },
             Err(_) => {
+                #[cfg(not(feature = "hoen-mailbox"))]
                 // timeout
                 unsafe {
                     let tmp = get_current_session(share_rdp());
@@ -847,16 +970,52 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
         }
     }
 
+    #[cfg(not(feature = "hoen-mailbox"))]
     if !h_process.is_null() {
         send_close_async("").await.ok();
         unsafe { CloseHandle(h_process) };
     }
 
+    #[cfg(feature = "hoen-mailbox")]
+    let exit_code = {
+        status_handle.set_service_status(ServiceStatus {
+            service_type: SERVICE_TYPE,
+            current_state: ServiceState::StopPending,
+            controls_accepted: ServiceControlAccept::empty(),
+            exit_code: ServiceExitCode::Win32(0),
+            checkpoint: 1,
+            wait_hint: Duration::from_secs(12),
+            process_id: None,
+        })?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut next_request = Instant::now();
+        let mut stopped = h_process.is_null();
+        while !stopped && Instant::now() < deadline {
+            let mut code: DWORD = 0;
+            if unsafe { GetExitCodeProcess(h_process, &mut code) } == TRUE && code != STILL_ACTIVE {
+                stopped = unsafe { CloseHandle(h_process) } == TRUE;
+                break;
+            }
+            if Instant::now() >= next_request {
+                if let Err(error) = close_owned_worker(h_process).await {
+                    log::debug!("Unable to request owned worker exit: {error}");
+                }
+                next_request = Instant::now() + Duration::from_secs(1);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if stopped { 0 } else {
+            log::error!("Owned worker did not stop; service shutdown failed");
+            ERROR_SERVICE_REQUEST_TIMEOUT
+        }
+    };
+    #[cfg(not(feature = "hoen-mailbox"))]
+    let exit_code = 0;
     status_handle.set_service_status(ServiceStatus {
         service_type: SERVICE_TYPE,
         current_state: ServiceState::Stopped,
         controls_accepted: ServiceControlAccept::empty(),
-        exit_code: ServiceExitCode::Win32(0),
+        exit_code: ServiceExitCode::Win32(exit_code),
         checkpoint: 0,
         wait_hint: Duration::default(),
         process_id: None,
@@ -5075,6 +5234,39 @@ ProcessId=10136
 #[cfg(all(test, feature = "hoen-mailbox"))]
 mod hoen_stock_gate_tests {
     use super::*;
+
+    #[test]
+    fn mailbox_worker_backoff_saturates_and_requires_observed_uptime_to_reset() {
+        let base = Instant::now();
+        let mut retry = MailboxWorkerRetry::new(base);
+        for (n, expected) in [1, 2, 4, 8, 16, 30, 30].iter().enumerate() {
+            let now = base + Duration::from_secs(n as u64 * 40);
+            retry.started(now);
+            retry.failed(now + Duration::from_secs(1));
+            assert_eq!(retry.next_attempt.duration_since(now + Duration::from_secs(1)), Duration::from_secs(*expected));
+        }
+        let now = base + Duration::from_secs(400);
+        retry.started(now);
+        retry.observe_alive(now + Duration::from_secs(29));
+        assert!(retry.failures > 0);
+        retry.observe_alive(now + Duration::from_secs(30));
+        assert_eq!(retry.failures, 0);
+        retry.failed(now + Duration::from_secs(31));
+        assert_eq!(retry.next_attempt, now + Duration::from_secs(32));
+    }
+
+    #[test]
+    fn mailbox_worker_checks_remain_due_during_busy_ipc() {
+        let base = Instant::now();
+        let mut retry = MailboxWorkerRetry::new(base);
+        assert!(retry.check_due(base));
+        for _ in 0..1000 { assert!(!retry.check_due(base + Duration::from_millis(999))); }
+        assert!(retry.check_due(base + Duration::from_secs(1)));
+        retry.failed(base + Duration::from_secs(1));
+        retry.session_closed(base + Duration::from_secs(2));
+        assert_eq!(retry.failures, 1);
+        assert_eq!(retry.next_attempt, base + Duration::from_secs(2));
+    }
 
     #[test]
     fn stock_mutators_reject_before_side_effects() {

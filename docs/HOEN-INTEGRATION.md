@@ -15,7 +15,7 @@ The user approved RustDesk as the remote desktop engine on 2026-11-05. Preserve 
 
 Any authenticated mailbox user may connect to any registered, hosting-enabled machine. A disabled or revoked host must not admit a new session. Enrollment and authentication must be verified by the service; a RustDesk name, address or self-reported peer ID does not establish a mailbox identity. Existing operator-only read credentials are not an interactive user enrollment mechanism.
 
-Windows Phase 1 includes Lenovo and Area51 in either role, unattended locked/signed-out access, installer and rollback, and approved home Wi-Fi only. Shared code must support Mac host and viewer development in parallel. Future off-LAN access is architectural scope, not permission to enable public rendezvous/relay now.
+Windows Phase 1 includes Lenovo and Area51 in either role, unattended locked/signed-out access, installer and rollback, and direct access between devices on the same local network over Wi-Fi or Ethernet. The network name and Windows Public/Private category are not access controls. Shared code must support Mac host and viewer development in parallel. VPN access is a future feature; public rendezvous/relay is not enabled now.
 
 The user accepts RustDesk's supported clipboard formats, including text, images and rich text. The previous text-only filter and custom text limit are superseded. Separate file-transfer sessions remain out of scope. Clipboard content must never enter session history or mailbox audit events.
 
@@ -25,7 +25,7 @@ The mailbox owns enrollment, access grants, deliberately shared secrets, and met
 
 1. Establish reproducible Windows builds and a source/license-preserving package. Use pinned upstream dependencies and record the exact built revision. Verify install/uninstall without claiming service-running means a usable host.
 2. Add mailbox machine registration and a short-lived connection authorization flow. Bind the authenticated mailbox viewer to the intended host and the actual encrypted session, with expiry, replay rejection and revocation. Keep credentials out of command lines and ordinary messages. All authenticated users share the access policy; identity proof still distinguishes them for audit.
-3. Enforce approved local interface/network and peer admission across every enabled transport. No fallback to public discovery/relay. Missing policy fails closed. Keep upstream behavior unchanged outside explicitly enabled Hoen mode.
+3. Enforce direct on-link peer admission over physical Wi-Fi or Ethernet for the initial local-network transport. No fallback to public discovery/relay. Missing transport policy fails closed. Keep upstream behavior unchanged outside explicitly enabled Hoen mode; add a separately reviewed VPN transport policy later.
 4. Add durable metadata-only history delivery, then authenticated lifecycle hooks. Preserve stable event IDs over retries and display a missing end as unknown/stale. Do not attribute a session using a self-reported RustDesk viewer ID. New sessions require valid identity and working local durable audit storage; a temporary mailbox delivery outage may queue events without inventing successful central delivery.
 5. Validate actual host/viewer operation in both Windows role directions, native clipboard formats, disconnect/reconnect, lock/sign-out, reboot, network changes, authentication rejection, revocation and history recovery. Readiness for user testing requires working artifacts and local integration evidence; final two-machine acceptance remains separate.
 

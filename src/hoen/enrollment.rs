@@ -10,6 +10,15 @@ pub(crate) fn command() -> Option<ResultType<()>> {
     use std::io::Read;
     let mut args = std::env::args().skip(1);
     let command = args.next();
+    #[cfg(target_os = "macos")]
+    if command.as_deref() == Some("--hoen-provision-host-from-viewer") {
+        return Some((|| {
+            if args.next().is_some() {
+                bail!("host provisioning takes no arguments");
+            }
+            super::runtime::provision_host_from_viewer()
+        })());
+    }
     let purpose = match command.as_deref() {
         Some("--hoen-import-viewer") => Purpose::Viewer,
         Some("--hoen-import-host") => Purpose::HostService,

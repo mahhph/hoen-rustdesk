@@ -73,4 +73,32 @@ void main() {
         isNull);
     expect(connected, isNull);
   });
+
+  testWidgets('another machine can be selected after an attempted connection', (tester) async {
+    final attempts = <String>[];
+    final twoHosts = jsonEncode({
+      'service_available': true,
+      'identity': 'mac',
+      'machines': [
+        {'identity': 'lenovo', 'display_name': 'Lenovo', 'hosting_enabled': true},
+        {'identity': 'windows', 'display_name': 'Area51', 'hosting_enabled': true},
+      ],
+    });
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MailboxHomePage(
+      loadDirectory: () async => twoHosts,
+      connect: attempts.add,
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lenovo').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect'));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Area51').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect'));
+    expect(attempts, ['lenovo', 'windows']);
+  });
 }

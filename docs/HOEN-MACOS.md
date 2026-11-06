@@ -1,5 +1,27 @@
 # macOS mailbox host development
 
+## Mac viewer test (2026-11-06)
+
+The user tested the development Mac client against both Area 51 and Lenovo and
+reported that both worked. Before the final monitor/retry fix, a connection to
+Area 51 displayed the desktop but repeatedly disconnected; after the fix the
+user reported success against both machines. The current development viewer
+uses the existing `mac` mailbox identity with a Keychain-protected signing key.
+This user-reported result is viewer evidence; it does not establish Mac host,
+unattended service, clipboard-format, or session-history acceptance.
+
+## Mac host development: shared device identity
+
+The development client can provision a separate host Keychain entry from its
+existing protected viewer entry with `--hoen-provision-host-from-viewer`. This
+explicit operation reuses the same mailbox identity, trust, credential and
+signing key, and refuses to replace an existing host entry. It does not start a
+listener or grant a remote connection. The host must still bind successfully,
+register with the mailbox, complete the authenticated transport and grant
+checks, and pass interactive capture/input permission and live-session tests.
+This is a logged-in-user development path, not an unattended login-window
+service or a production installer.
+
 Current seq210 integration supersedes earlier network policy and readiness notes below.
 The native TCP transport checks its configured local binding; adapter/network IDs,
 SSID, interface type, OS category and peer route are not authorization checks.

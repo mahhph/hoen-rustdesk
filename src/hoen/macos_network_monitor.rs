@@ -56,11 +56,40 @@ extern "C" {
 unsafe extern "C" fn changed(_: Store, _: CFArrayRef, info: *mut c_void) {
     // The run-loop source is removed and the store released before this borrowed pointer expires.
     let shared = &*(info as *const Arc<Shared>);
+    hbb_common::throttled_log!(Duration::from_secs(30), info, "Mac network configuration changed");
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.invalidate())).is_err() {
         shared.close_fast();
     }
 }
 struct Route(i32);
+// Ignore routing queries and neighbor-cache/multicast churn. A malformed or
+// unfamiliar notification remains conservative and invalidates the session.
+fn route_change(bytes: &[u8]) -> bool {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes.len() - offset < 4 {
+            return true;
+        }
+        let length = u16::from_ne_bytes([bytes[offset], bytes[offset + 1]]) as usize;
+        if length < 4 || length > bytes.len() - offset || bytes[offset + 2] != 5 {
+            return true;
+        }
+        match bytes[offset + 3] {
+            0x04 | 0x07 | 0x0b | 0x0f | 0x10 | 0x13 | 0x14 => {}
+            0x01 | 0x02 | 0x03 | 0x09 | 0x0a => {
+                if length < 12 { return true; }
+                let flags = u32::from_ne_bytes([
+                    bytes[offset + 8], bytes[offset + 9],
+                    bytes[offset + 10], bytes[offset + 11],
+                ]);
+                if flags & 0x400 == 0 { return true; } // RTF_LLINFO
+            }
+            _ => return true,
+        }
+        offset += length;
+    }
+    false
+}
 impl Route {
     fn open() -> Result<Self, MonitorError> {
         // Darwin PF_ROUTE, SOCK_RAW, AF_UNSPEC. Nonblocking reads let the run loop and stop
@@ -83,7 +112,10 @@ impl Route {
         for _ in 0..128 {
             let count = unsafe { read(self.0, bytes.as_mut_ptr().cast(), bytes.len()) };
             if count > 0 {
-                shared.invalidate();
+                if route_change(&bytes[..count as usize]) {
+                    hbb_common::throttled_log!(Duration::from_secs(30), info, "Mac routing state changed");
+                    shared.invalidate();
+                }
             } else if count == 0 {
                 return Err(MonitorError::Unavailable);
             } else {
@@ -240,10 +272,46 @@ pub(super) fn start() -> Result<NetworkMonitor, MonitorError> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn route_queries_and_neighbor_events_do_not_end_connections() {
+        fn message(kind: u8, flags: u32) -> Vec<u8> {
+            let mut bytes = vec![0u8; 12];
+            bytes[..2].copy_from_slice(&12u16.to_ne_bytes());
+            bytes[2] = 5;
+            bytes[3] = kind;
+            bytes[8..12].copy_from_slice(&flags.to_ne_bytes());
+            bytes
+        }
+        assert!(!route_change(&message(0x04, 0)));
+        assert!(!route_change(&message(0x01, 0x400)));
+        assert!(route_change(&message(0x03, 0)));
+        assert!(route_change(&message(0x0c, 0)));
+        assert!(route_change(&[1, 0, 5]));
+        let mut combined = message(0x04, 0);
+        combined.extend(message(0x03, 0));
+        assert!(route_change(&combined));
+    }
+
     #[hbb_common::tokio::test]
     async fn starts_and_shuts_down() {
         let monitor = NetworkMonitor::start().await.expect("start macOS monitor");
         assert!(!monitor.state().closed);
+        monitor.shutdown().await.expect("monitor shutdown");
+    }
+
+    #[hbb_common::tokio::test]
+    #[ignore = "requires local route and routing-socket access"]
+    async fn route_query_does_not_invalidate_live_monitor() {
+        let monitor = NetworkMonitor::start().await.expect("start macOS monitor");
+        let captured = monitor.state();
+        let status = std::process::Command::new("/sbin/route")
+            .args(["-n", "get", "default"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status().expect("query route");
+        assert!(status.success());
+        hbb_common::tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(monitor.is_current(captured));
         monitor.shutdown().await.expect("monitor shutdown");
     }
 

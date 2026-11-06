@@ -391,7 +391,7 @@ impl<T: InvokeUiSession> Remote<T> {
                 loop {
                     #[cfg(feature = "hoen-mailbox")]
                     if !self.hoen_current() {
-                        self.handler.on_establish_connection_error("Approved home network changed".into());
+                        self.handler.on_establish_connection_error("Network connection changed; reconnect to continue".into());
                         break;
                     }
                     tokio::select! {
@@ -400,7 +400,7 @@ impl<T: InvokeUiSession> Remote<T> {
                             {
                                 tokio::select! {
                                     biased;
-                                    _ = hoen_network_events.changed() => Some(Err(std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "Approved home network changed"))),
+                                    _ = hoen_network_events.changed() => Some(Err(std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "Network connection changed; reconnect to continue"))),
                                     result = peer.next() => result,
                                 }
                             }
@@ -483,7 +483,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                     None => false,
                                 };
                                 if !allowed {
-                                    self.handler.on_establish_connection_error("Approved home network is unavailable".into());
+                                    self.handler.on_establish_connection_error("Network connection is unavailable".into());
                                     break;
                                 }
                                 if !self.hoen_current() { break; }

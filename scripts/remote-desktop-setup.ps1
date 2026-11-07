@@ -1,9 +1,10 @@
-<# Fresh-install entry point for a reviewed release bundle. #>
+<# Installation and upgrade entry point for a reviewed release bundle. #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Plan','Install')][string]$Action = 'Plan',
+    [ValidateSet('Plan','Install','Upgrade')][string]$Action = 'Plan',
     [string]$ClientConfigPath,
-    [string]$ApprovedConfigPath
+    [string]$ApprovedConfigPath,
+    [string]$OldManifest
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -13,6 +14,11 @@ $payload=Join-Path $root 'payload'
 $manifest=Join-Path $root 'payload-manifest.json'
 if ($Action -eq 'Plan') {
     & $installer -Action Plan -SourceDirectory $payload -ExpectedManifest $manifest
+    return
+}
+if ($Action -eq 'Upgrade') {
+    if (-not $OldManifest) { throw 'Upgrade requires the separately reviewed manifest for the installed version.' }
+    & (Join-Path $PSScriptRoot 'remote-desktop-upgrade-flow.ps1') -SourceDirectory $payload -OldManifest $OldManifest -NewManifest $manifest
     return
 }
 if (-not $ClientConfigPath -or -not $ApprovedConfigPath) {

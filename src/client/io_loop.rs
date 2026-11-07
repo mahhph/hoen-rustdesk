@@ -148,7 +148,7 @@ impl ParsedPeerInfo {
 impl<T: InvokeUiSession> Remote<T> {
     #[cfg(feature = "hoen-mailbox")]
     fn hoen_current(&self) -> bool {
-        self.hoen.as_ref().map_or(false, |connection| connection.guard.is_current())
+        self.hoen.is_some()
     }
     pub fn new(
         handler: Session<T>,
@@ -203,7 +203,6 @@ impl<T: InvokeUiSession> Remote<T> {
             }
             _ => bail!("mailbox mode only supports desktop sessions"),
         }
-        if !connection.guard.is_current() { bail!("approved network changed"); }
         peer.send(&message).await?;
         if let Some(connection) = self.hoen.as_mut() { connection.login_sent = true; }
         Ok(())
@@ -273,7 +272,7 @@ impl<T: InvokeUiSession> Remote<T> {
             let (transport, proof) = {
             let runtime = crate::hoen::runtime::viewer().await?;
             crate::hoen::transport::Transport::connect(
-                runtime.policy.clone(), &runtime.mailbox, host, &runtime.signing_key, runtime.monitor.clone(),
+                runtime.policy.clone(), &runtime.mailbox, host, &runtime.signing_key,
             ).await?
             };
             let (peer, guard) = transport.into_parts();
@@ -378,35 +377,9 @@ impl<T: InvokeUiSession> Remote<T> {
                 let mut webrtc_suspect_since: Option<Instant> = None;
                 let mut last_rx_progress = peer.rx_progress();
                 let mut peer_gone = false;
-                #[cfg(feature = "hoen-mailbox")]
-                let mut hoen_network_events = match self.hoen.as_ref() {
-                    Some(connection) => connection.guard.subscribe(),
-                    None => {
-                        self.handler.on_establish_connection_error("Mailbox network monitor unavailable".into());
-                        self.handle_disconnected(round);
-                        return;
-                    }
-                };
-
                 loop {
-                    #[cfg(feature = "hoen-mailbox")]
-                    if !self.hoen_current() {
-                        self.handler.on_establish_connection_error("Network connection changed; reconnect to continue".into());
-                        break;
-                    }
                     tokio::select! {
-                        res = async {
-                            #[cfg(feature = "hoen-mailbox")]
-                            {
-                                tokio::select! {
-                                    biased;
-                                    _ = hoen_network_events.changed() => Some(Err(std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "Network connection changed; reconnect to continue"))),
-                                    result = peer.next() => result,
-                                }
-                            }
-                            #[cfg(not(feature = "hoen-mailbox"))]
-                            { peer.next().await }
-                        } => {
+                        res = peer.next() => {
                             if let Some(res) = res {
                                 match res {
                                     Err(err) => {
@@ -474,20 +447,6 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         _ = status_timer.tick() => {
-                            // Notifications invalidate the guard; snapshots provide a
-                            // second check for changes the OS did not notify.
-                            #[cfg(feature = "hoen-mailbox")]
-                            {
-                                let allowed = match self.hoen.as_ref() {
-                                    Some(connection) => matches!(time::timeout(Duration::from_secs(5), connection.guard.recheck()).await, Ok(Ok(()))),
-                                    None => false,
-                                };
-                                if !allowed {
-                                    self.handler.on_establish_connection_error("Network connection is unavailable".into());
-                                    break;
-                                }
-                                if !self.hoen_current() { break; }
-                            }
                             if self.handler.is_restarting_remote_device()
                                 && last_recv_time.elapsed() >= RESTART_REMOTE_DEVICE_NO_DATA_TIMEOUT
                             {
@@ -1945,7 +1904,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                 _ => false,
                             };
                             if !allowed || !self.hoen_current() {
-                                self.handler.on_error("Mailbox session was not authorized on the approved network");
+                                self.handler.on_error("Mailbox session was not authorized");
                                 return false;
                             }
                             if !self.is_connected {

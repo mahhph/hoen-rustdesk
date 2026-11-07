@@ -276,7 +276,7 @@ pub(crate) async fn create_hoen_connection(
     let unauthorized = admit_unauthorized(id, addr.ip())
         .ok_or_else(|| hbb_common::anyhow::anyhow!("too many unauthenticated connections"))?;
     let transport = tokio::select! {
-        result = crate::hoen::transport::Transport::accept(socket, runtime.policy.clone(), &runtime.signing_key, runtime.monitor.clone()) => result?,
+        result = crate::hoen::transport::Transport::accept(socket, runtime.policy.clone(), &runtime.signing_key) => result?,
         _ = unauthorized.evicted() => bail!("connection evicted"),
     };
     if crate::hoen::host::disabled() { bail!("mailbox hosting is disabled"); }

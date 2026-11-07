@@ -976,8 +976,18 @@ def build_flutter_windows(version, features, skip_portable_pack):
         if not os.path.exists("target/release/librustdesk.dll"):
             print("cargo build failed, please check rust source code.")
             exit(-1)
+    try:
+        build_id = subprocess.check_output(
+            ['git', 'rev-parse', '--short=12', 'HEAD'], cwd=REPO_ROOT,
+            stderr=subprocess.DEVNULL, text=True).strip()
+        if subprocess.check_output(
+                ['git', 'status', '--porcelain', '--untracked-files=no'],
+                cwd=REPO_ROOT, stderr=subprocess.DEVNULL, text=True).strip():
+            build_id += '-modified'
+    except (subprocess.SubprocessError, OSError):
+        build_id = 'unknown'
     os.chdir('flutter')
-    system2('flutter build windows --release')
+    system2(f'flutter build windows --release --dart-define=HOEN_BUILD_ID={build_id}')
     os.chdir('..')
     shutil.copy2('target/release/deps/dylib_virtual_display.dll',
                  flutter_build_dir_2)

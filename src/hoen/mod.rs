@@ -17,6 +17,5 @@ pub(crate) mod macos_namespace;
 mod macos_private_dir;
 pub(crate) mod machine_bootstrap;
 pub(crate) mod network;
-pub(crate) mod network_monitor;
 pub(crate) mod runtime;
 pub(crate) mod transport;

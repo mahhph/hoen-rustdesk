@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - 'scripts/*remote-desktop*.ps1'
+      - 'scripts/*package-remote-desktop.py'
+      - 'docs/WINDOWS-RELEASE-BUNDLE.md'
       - '.github/workflows/windows-installer.yml'
   push:
     branches: [develop]
     paths:
       - 'scripts/*remote-desktop*.ps1'
+      - 'scripts/*package-remote-desktop.py'
+      - 'docs/WINDOWS-RELEASE-BUNDLE.md'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
 
@@ -24,6 +28,9 @@ jobs:
         shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
+      - name: Test release bundle construction
+        shell: pwsh
+        run: python ./scripts/test-package-remote-desktop.py
       - name: Check installer, firewall and upgrade guards
         shell: pwsh
         run: |

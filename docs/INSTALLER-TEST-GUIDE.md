@@ -2,6 +2,8 @@
 
 Scope: the first integrated installer/firewall and staged payload upgrade/restore trial. Use a designated Windows test machine or a user-agreed maintenance window. Do not interrupt an active remote session. These scripts are not an unattended update service, and this guide does not declare production deployment acceptance.
 
+An experimental unsigned release bundle can be built with `python scripts/package-remote-desktop.py --payload <build-directory> --manifest <reviewed-manifest> --output <new-zip-path> --payload-revision <full-payload-commit>`. The packager refuses a payload that differs from the reviewed manifest and prints the ZIP SHA-256 for publication through a separately trusted channel. The supplied revision is a packager assertion, not verified build provenance. The bundle is not yet a graphical installer or a validated production release; see `WINDOWS-RELEASE-BUNDLE.md`.
+
 ## Inputs and preflight
 
 - Run from the reviewed source revision in an elevated Windows PowerShell or PowerShell 7 session. Keep installer, bootstrap, firewall and upgrade scripts from the same revision together.

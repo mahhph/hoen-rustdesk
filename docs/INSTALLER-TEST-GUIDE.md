@@ -2,6 +2,8 @@
 
 Scope: the first integrated installer/firewall and staged payload upgrade/restore trial. Use a designated Windows test machine or a user-agreed maintenance window. Do not interrupt an active remote session. These scripts are not an unattended update service, and this guide does not declare production deployment acceptance.
 
+An experimental unsigned release bundle can be built with `python scripts/package-remote-desktop.py --payload <build-directory> --manifest <reviewed-manifest> --output <new-zip-path> --payload-revision <full-payload-commit>`. The packager refuses a payload that differs from the reviewed manifest and prints the ZIP SHA-256 for publication through a separately trusted channel. The supplied revision is a packager assertion, not verified build provenance. The bundle is not yet a graphical installer or a validated production release; see `WINDOWS-RELEASE-BUNDLE.md`.
+
 ## Inputs and preflight
 
 - Run from the reviewed source revision in an elevated Windows PowerShell or PowerShell 7 session. Keep installer, bootstrap, firewall and upgrade scripts from the same revision together.
@@ -35,6 +37,17 @@ Close the client and finish all sessions, then use `Deactivate`. Review the appr
 Adoption requires a cleanly stopped/disabled service and no installed payload process. Before stopping, independently confirm the approved configuration's port matches the existing listener (or the original approved enrollment record). `-ConfirmedExistingListenerPort` asserts this operator check; the installer cannot prove the port inside SYSTEM-only encrypted enrollment. It records only public installation metadata and does not decrypt service credentials. A changed configuration digest or existing metadata is rejected. The prior manual rule `HoenRemoteDesktopServiceTCP42830`, if present, remains separately owned and untouched.
 
 ## Stage and upgrade
+
+For an existing installation with adopted firewall metadata, the experimental
+`remote-desktop-upgrade-flow.ps1` coordinates staging, session checks, service
+stop, replacement, activation and verified recovery. Supply the same reviewed
+`SourceDirectory`, `OldManifest` and `NewManifest` paths shown below. It refuses
+an active matching installed-client session or another installed client/tray
+process; it never closes them. It rechecks immediately before stopping, but this
+is not an atomic session lock. The protected recovery workspace is retained and
+must not be deleted to force another upgrade. Fresh installation, legacy firewall
+adoption and a user-facing installer are separate work.
+Synthetic guard tests are not a production-readiness claim.
 
 ```powershell
 ./scripts/remote-desktop-upgrade.ps1 -Action Stage -SourceDirectory C:\review\new-payload -OldManifest C:\review\old-manifest.json -NewManifest C:\review\new-manifest.json
@@ -70,6 +83,7 @@ In an isolated fixture/VM, exercise interruption after the first directory move,
 
 - Service stop/start is explicit; there is no automatic deployment scheduler or session-drain protocol. A running service is not proof that no user session is active.
 - If staging fails before a complete recovery record exists, the original installation remains intact but the workspace is retained for administrator inspection. Automatic cleanup of that incomplete workspace is not implemented.
-- The workspace retains both reviewed versions. Automatic retirement/rotation for a later, different upgrade is not implemented; do not delete recovery data during this trial.
+- After verifying an end-to-end connection, an operator can run `./scripts/remote-desktop-upgrade.ps1 -Action Archive -ConfirmHealthy`. This checks the installed and previous payloads and moves the recovery workspace to a unique protected sibling directory, retaining the previous package and freeing the original workspace for a later upgrade. Record the output path. The normal `Restore` action only operates on the active workspace, so recovery from an archive requires manual investigation; archive recovery and automatic retention/rotation have not been validated. Archives consume disk space; do not delete recovery data during this trial.
+- For a verified staged or restored layout with the original package still installed, `./scripts/remote-desktop-upgrade.ps1 -Action ArchiveRestored` preserves the staged replacement and recovery record in a unique protected archive without changing the installed application. This does not assert that desktop connections work. It requires a running automatic owned service, verifies both payloads, and refuses unexpected contents. Record the archive path; recovery from an archive requires manual investigation. Test the baseline connection separately.
 - Restoring payload files does not reverse application data-schema migrations. Test version compatibility before using a pair of releases; no credential/history rollback is attempted.
 - Mocked service tests and isolated filesystem tests do not prove live SCM behavior, effective network policy, post-upgrade desktop readiness or disaster recovery. Record those outcomes separately before closing PRD-01/02.

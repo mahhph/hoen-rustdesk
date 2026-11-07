@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - 'scripts/*remote-desktop*.ps1'
+      - 'scripts/*package-remote-desktop.py'
+      - 'docs/WINDOWS-RELEASE-BUNDLE.md'
       - '.github/workflows/windows-installer.yml'
   push:
     branches: [develop]
     paths:
       - 'scripts/*remote-desktop*.ps1'
+      - 'scripts/*package-remote-desktop.py'
+      - 'docs/WINDOWS-RELEASE-BUNDLE.md'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
 
@@ -24,6 +28,9 @@ jobs:
         shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
+      - name: Test release bundle construction
+        shell: pwsh
+        run: python ./scripts/test-package-remote-desktop.py
       - name: Check installer, firewall and upgrade guards
         shell: pwsh
         run: |
@@ -32,7 +39,8 @@ jobs:
             'test-remote-desktop-service-installer.ps1',
             'test-remote-desktop-firewall.ps1',
             'test-remote-desktop-installer-firewall.ps1',
-            'test-remote-desktop-upgrade.ps1'
+            'test-remote-desktop-upgrade.ps1',
+            'test-remote-desktop-upgrade-flow.ps1'
           )
           foreach ($testScript in $testScripts) {
             & '${{ matrix.shell }}' -NoProfile -ExecutionPolicy Bypass -File "./scripts/$testScript"

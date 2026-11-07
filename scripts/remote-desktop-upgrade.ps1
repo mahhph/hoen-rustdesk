@@ -1,19 +1,22 @@
 <#
 .SYNOPSIS
-Stage, replace, or restore a reviewed Remote Desktop Service payload.
+Stage, replace, restore, or archive a reviewed Remote Desktop Service payload.
 .DESCRIPTION
 Upgrade and Restore require the owned service cleanly stopped and disabled and all
 installed payload processes exited. No action changes service state, credentials,
 history, or firewall configuration. Stage keeps an independently verified old
 package recoverable across either directory rename. Never delete the protected
 upgrade workspace while recovery may be needed.
+Archive moves a verified recovery workspace aside after the operator confirms
+the upgraded client works, retaining the previous package for manual recovery.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('Stage','Upgrade','Restore','Validate')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('Stage','Upgrade','Restore','Validate','Archive','ArchiveRestored')][string]$Action,
     [string]$SourceDirectory,
     [string]$OldManifest,
-    [string]$NewManifest
+    [string]$NewManifest,
+    [switch]$ConfirmHealthy
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -164,6 +167,15 @@ function Move-Verified([string]$From,[string]$To) {
     if (Test-Path -LiteralPath $To) { throw 'Destination already exists; recovery requires inspection.' }
     [IO.Directory]::Move($From,$To)
 }
+function Assert-ArchiveUnused([string]$Path) {
+    $prefix=[IO.Path]::GetFullPath($Path).TrimEnd('\')+'\'
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='rustdesk.exe'" -ErrorAction Stop)) {
+        if ([string]::IsNullOrWhiteSpace($process.ExecutablePath)) { throw 'Cannot verify a RustDesk process path.' }
+        if ([IO.Path]::GetFullPath($process.ExecutablePath).StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+            throw 'A process is using the recovery package.'
+        }
+    }
+}
 
 Assert-Admin
 Assert-NoReparse $programFiles
@@ -243,6 +255,33 @@ try {
         } else { throw 'Restore layout is not recoverable automatically.' }
         Assert-Package $target $record.old $record.installation
         Write-Output 'Original payload restored; verified replacement retained. Service remains stopped and disabled.'
+        return
+    }
+    if ($Action -in @('Archive','ArchiveRestored')) {
+        if ($Action -eq 'Archive') {
+            if (-not $ConfirmHealthy) { throw 'Confirm a successful connection before archiving the recovery workspace.' }
+            if (-not $targetExists -or $stageExists -or -not $backupExists) { throw 'Only a completed upgrade can be archived.' }
+            $retained=$backup; $retainedName='old'
+            Assert-Package $target $record.new $record.installation
+            Assert-Package $retained $record.old $record.installation
+        } else {
+            if (-not $targetExists -or -not $stageExists -or $backupExists) { throw 'Only a verified restored or staged layout can be archived.' }
+            $retained=$stage; $retainedName='new'
+            Assert-Package $target $record.old $record.installation
+            Assert-Package $retained $record.new $record.installation
+        }
+        $service=Get-OwnedService
+        if ($service.State -ne 'Running' -or $service.StartMode -ne 'Auto') { throw 'The installed service is not running automatically.' }
+        $contents=@(Get-ChildItem -LiteralPath $work -Force)
+        if ($contents.Count -ne 2 -or @($contents | Where-Object { $_.Name -notin @($retainedName,'recovery.json') -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -ne 0) {
+            throw 'Unexpected recovery workspace contents; refusing to move it.'
+        }
+        Assert-ArchiveUnused $retained
+        $archive=[IO.Path]::GetFullPath((Join-Path $programFiles ('Remote Desktop Service Upgrade Archive-' + [guid]::NewGuid().ToString('N'))))
+        if ([IO.Path]::GetDirectoryName($archive) -ine [IO.Path]::GetFullPath($programFiles).TrimEnd('\')) { throw 'Invalid archive destination.' }
+        Move-Verified $work $archive
+        if ($Action -eq 'Archive') { Write-Output "Recovery workspace archived at $archive; previous package retained." }
+        else { Write-Output "Recovery workspace archived at $archive; staged package retained, installed package unchanged." }
         return
     }
     if ($targetExists -and $stageExists -and -not $backupExists) { Assert-Package $target $record.old $record.installation; Assert-Package $stage $record.new $record.installation; 'Staged; original payload is installed.'; return }

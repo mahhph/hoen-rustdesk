@@ -41,7 +41,9 @@ Acceptance criteria:
 
 Implementation checkpoint: installer/firewall integration and protected public port/ownership metadata are implemented, with explicit legacy adoption. The standalone upgrade tool stages a verified replacement, retains the old package and supports verified restore/recovery between directory moves. PowerShell 5.1 and 7 isolated filesystem tests passed; service state checks were simulated. Use [the controlled test guide](INSTALLER-TEST-GUIDE.md) for live validation. Automatic session drain, deployment orchestration, recovery-workspace retirement, live activation/reconnection and identity/history continuity remain acceptance work. PRD-01's fresh-machine trial is also still open.
 
-## PRD-03 — Signed, traceable releases
+Additional evidence (2026-11-07): Area51 adopted its existing port, staged and installed build `0b372d9da452`, restarted successfully, retained the prior package and re-registered the same public identity. An experimental coordinator combines verified staging, active-session checks, stop, replacement, activation and recovery; synthetic guard and recovery tests pass in both PowerShell versions. Its checks are not an atomic session lock. An explicit archive action preserves a verified previous package and permits subsequent staging in isolated tests; live archive recovery and retention policy remain unvalidated. Fresh-machine installation, end-to-end reconnection, injected real failures and a user-facing package remain open.
+
+## PRD-03 — Traceable releases
 
 **Status:** Ready. **Priority:** P1. **Owner:** Release engineering.
 
@@ -51,9 +53,9 @@ Acceptance criteria:
 
 - A documented build pins source revision, toolchains, dependencies and generated bridge artifacts; a clean CI build produces the expected package without developer-local files.
 - Package and application show a consistent version, product name and distinct icon. Release notes identify changes, known limits and supported OS versions.
-- Windows signing verifies publisher identity and timestamp; the signing key is held by an approved protected signing mechanism, never in the repository or ordinary build logs. Report missing signing access as a dependency rather than ship an unsigned artifact as signed.
+- The user does not want a paid signing certificate. An unsigned release must be identified as unsigned and may trigger Windows publisher warnings; never present it as signed. If a no-cost signing identity is explicitly chosen later, verify publisher identity and timestamp and keep its key out of the repository and ordinary logs.
 - Publish checksums, source revision, corresponding source/license notices and a manifest with the release. Verification rejects altered package contents.
-- A fresh Windows machine installs the signed artifact, connects and uninstalls through documented steps. Reproducibility means traceable controlled inputs; claim byte-identical builds only if separately demonstrated.
+- A fresh Windows machine installs the clearly identified artifact, connects and uninstalls through documented steps. Reproducibility means traceable controlled inputs; claim byte-identical builds only if separately demonstrated.
 
 ## PRD-04 — Unattended operation and recovery
 

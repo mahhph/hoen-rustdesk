@@ -2,7 +2,6 @@ use super::{
     authorization, handshake,
     mailbox_worker::MailboxWorker,
     network,
-    network_monitor::{NetworkMonitor, State},
 };
 use base::message_proto::HoenProof;
 use hbb_common::{
@@ -17,7 +16,7 @@ use hbb_common::{
     ResultType,
 };
 use hoen_mailbox_auth::mailbox::{ConsumedGrant, Identity};
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 fn tcp_failure(kind: std::io::ErrorKind) -> &'static str {
     match kind {
@@ -35,8 +34,6 @@ pub(crate) struct Transport {
     policy: network::Policy,
     local: SocketAddr,
     peer: SocketAddr,
-    monitor: Arc<NetworkMonitor>,
-    captured: State,
 }
 
 /// Owned by one live connection; never indexed or cached by peer identity.
@@ -45,17 +42,9 @@ pub(crate) struct NetworkGuard {
     policy: network::Policy,
     local: SocketAddr,
     peer: SocketAddr,
-    monitor: Arc<NetworkMonitor>,
-    captured: State,
 }
 
 impl NetworkGuard {
-    pub fn is_current(&self) -> bool {
-        self.monitor.is_current(self.captured)
-    }
-    pub fn subscribe(&self) -> hbb_common::tokio::sync::watch::Receiver<()> {
-        self.monitor.subscribe()
-    }
     pub fn local_addr(&self) -> SocketAddr {
         self.local
     }
@@ -63,13 +52,7 @@ impl NetworkGuard {
         self.peer
     }
     pub async fn recheck(&self) -> ResultType<()> {
-        if !self.is_current() {
-            bail!("network changed during mailbox session");
-        }
         admit(self.policy.clone(), self.local, self.peer).await?;
-        if !self.is_current() {
-            bail!("network changed during mailbox session");
-        }
         Ok(())
     }
     pub async fn authenticate(
@@ -107,21 +90,12 @@ impl Transport {
                 policy: self.policy,
                 local: self.local,
                 peer: self.peer,
-                monitor: self.monitor,
-                captured: self.captured,
             },
         )
     }
-    /// Call again on network notifications and before session admission. The
-    /// connection loop must close on failure; the snapshot is not a lease.
+    /// Verify the socket binding before session admission.
     pub async fn recheck(&self) -> ResultType<()> {
-        if !self.monitor.is_current(self.captured) {
-            bail!("network changed during mailbox connection");
-        }
         admit(self.policy.clone(), self.local, self.peer).await?;
-        if !self.monitor.is_current(self.captured) {
-            bail!("network changed during mailbox connection");
-        }
         Ok(())
     }
 
@@ -130,21 +104,13 @@ impl Transport {
         mailbox: &MailboxWorker,
         host: Identity,
         signing_key: &sign::SecretKey,
-        monitor: Arc<NetworkMonitor>,
     ) -> ResultType<(Self, HoenProof)> {
-        let captured = monitor.state();
-        if captured.closed {
-            bail!("network monitoring unavailable");
-        }
         let machine = mailbox.lookup(host.clone()).await
             .map_err(|error| anyhow!("Mailbox could not find or authorize the selected computer: {error}"))?;
         if machine.identity != host || !machine.hosting_enabled {
             bail!("mailbox host is unavailable");
         }
         let remote = SocketAddr::new(machine.endpoint.address(), machine.endpoint.port());
-        if !monitor.is_current(captured) {
-            bail!("network changed before mailbox connection");
-        }
         let socket = if remote.is_ipv4() {
             TcpSocket::new_v4()?
         } else {
@@ -169,8 +135,6 @@ impl Transport {
             policy,
             local,
             peer,
-            monitor,
-            captured,
         };
         transport.recheck().await?;
         let proof =
@@ -200,19 +164,7 @@ impl Transport {
         // Only the service's response to this validated request selects the
         // endpoint; never accept arbitrary peer-supplied routing information.
         Endpoint::new(lookup.endpoint.ip(), lookup.endpoint.port())?;
-        let monitor = Arc::new(
-            NetworkMonitor::start()
-                .await
-                .map_err(|_| anyhow!("network monitoring unavailable"))?,
-        );
-        let captured = monitor.state();
-        if captured.closed {
-            bail!("network monitoring unavailable");
-        }
         let remote = lookup.endpoint;
-        if !monitor.is_current(captured) {
-            bail!("network changed before mailbox connection");
-        }
         let socket = if remote.is_ipv4() {
             TcpSocket::new_v4()?
         } else {
@@ -228,9 +180,6 @@ impl Transport {
             bail!("mailbox peer address changed");
         }
         admit(policy.clone(), local, peer).await?;
-        if !monitor.is_current(captured) {
-            bail!("network changed before mailbox handshake");
-        }
         let mut stream = Stream::from(socket, local);
         let channel = handshake::viewer(&mut stream, &lookup.host_fingerprint).await?;
         let transport = Self {
@@ -239,8 +188,6 @@ impl Transport {
             policy,
             local,
             peer,
-            monitor,
-            captured,
         };
         transport.recheck().await?;
         let response = match service_request(Data::HoenProofRequest(ProofRequest {
@@ -263,18 +210,10 @@ impl Transport {
         socket: TcpStream,
         policy: network::Policy,
         signing_key: &sign::SecretKey,
-        monitor: Arc<NetworkMonitor>,
     ) -> ResultType<Self> {
-        let captured = monitor.state();
-        if captured.closed {
-            bail!("network monitoring unavailable");
-        }
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
         admit(policy.clone(), local, peer).await?;
-        if !monitor.is_current(captured) {
-            bail!("network changed before mailbox handshake");
-        }
         let mut stream = Stream::from(socket, local);
         let channel = handshake::host(&mut stream, signing_key, &signing_key.public_key()).await?;
         let transport = Self {
@@ -283,8 +222,6 @@ impl Transport {
             policy,
             local,
             peer,
-            monitor,
-            captured,
         };
         transport.recheck().await?;
         Ok(transport)
@@ -403,6 +340,27 @@ mod tests {
     }
 
     #[hbb_common::tokio::test]
+    async fn host_transport_establishes_verified_encrypted_channel() {
+        use sha2::{Digest, Sha256};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (public, secret) = sign::gen_keypair();
+        let fingerprint: [u8; 32] = Sha256::digest(public.0).into();
+        let host = hbb_common::tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let policy = network::Policy { local_address: address.ip() };
+            Transport::accept(socket, policy, &secret).await.unwrap()
+        });
+        let socket = TcpStream::connect(address).await.unwrap();
+        let mut viewer = Stream::from(socket, address);
+        let channel = handshake::viewer(&mut viewer, &fingerprint).await.unwrap();
+        let host = host.await.unwrap();
+        assert_eq!(channel.binding, host.channel.binding);
+        assert!(viewer.is_secured());
+        assert!(host.stream.is_secured());
+    }
+
+    #[hbb_common::tokio::test]
     async fn mismatched_binding_closes_before_host_greeting() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -413,8 +371,7 @@ mod tests {
         let policy = network::Policy {
             local_address: "127.0.0.2".parse().unwrap(),
         };
-        let monitor = Arc::new(NetworkMonitor::start().await.unwrap());
-        assert!(Transport::accept(socket, policy, &signing_key, monitor)
+        assert!(Transport::accept(socket, policy, &signing_key)
             .await
             .is_err());
 

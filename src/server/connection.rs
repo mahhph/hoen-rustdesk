@@ -549,7 +549,7 @@ impl Connection {
             hoen,
         } = meta;
         #[cfg(feature = "hoen-mailbox")]
-        if hoen.as_ref().map_or(true, |context| !context.guard.is_current()) || crate::hoen::host::disabled() { return; }
+        if hoen.is_none() || crate::hoen::host::disabled() { return; }
         // Android is not supported yet, so we always set control_permissions to None.
         #[cfg(target_os = "android")]
         let control_permissions = None;
@@ -730,12 +730,8 @@ impl Connection {
         #[cfg(feature = "hoen-mailbox")]
         let mut hoen_seen = false;
         #[cfg(feature = "hoen-mailbox")]
-        let mut hoen_network_changes = conn.hoen.as_ref().map(|context| context.guard.subscribe());
-        #[cfg(not(feature = "hoen-mailbox"))]
-        let mut hoen_network_changes: Option<tokio::sync::watch::Receiver<()>> = None;
-        #[cfg(feature = "hoen-mailbox")]
-        if conn.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) {
-            conn.on_close("network error", false).await;
+        if conn.hoen.is_none() {
+            conn.on_close("authorization unavailable", false).await;
             return;
         }
         let started = Instant::now();
@@ -774,15 +770,6 @@ impl Connection {
             tokio::select! {
                 // biased; // video has higher priority // causing test_delay_timer failed while transferring big file
 
-                _ = async {
-                    match hoen_network_changes.as_mut() {
-                        Some(changes) => { let _ = changes.changed().await; }
-                        None => std::future::pending::<()>().await,
-                    }
-                } => {
-                    conn.on_close("network error", false).await;
-                    break;
-                }
                 // Both end an unauthorized connection at once, not on the next timer tick:
                 // told to go to make room, or past the grace for its authorization. Neither
                 // fires once the connection has authorized.
@@ -1076,10 +1063,6 @@ impl Connection {
                             Ok(bytes) => {
                                 #[cfg(feature = "hoen-mailbox")]
                                 if conn.hoen.is_some() {
-                                    if conn.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) {
-                                        conn.on_close("network error", false).await;
-                                        break;
-                                    }
                                     let valid = crate::hoen::transport::validate_decrypted_frame(&bytes).is_ok()
                                         && Message::parse_from_bytes(&bytes).map_or(false, |m| m.union.is_some());
                                     if !valid {
@@ -1942,7 +1925,7 @@ impl Connection {
     // `true` does not necessarily mean authorization succeeded (e.g. REQUIRE_2FA case).
     async fn send_logon_response_and_keep_alive(&mut self) -> bool {
         #[cfg(feature = "hoen-mailbox")]
-        if self.hoen.as_ref().map_or(true, |context| !context.guard.is_current()) || self.hoen_grant.is_none() || crate::hoen::host::disabled() { return false; }
+        if self.hoen.is_none() || self.hoen_grant.is_none() || crate::hoen::host::disabled() { return false; }
         if self.authorized {
             return true;
         }
@@ -3034,7 +3017,7 @@ impl Connection {
             Ok(id) => {
                 self.hoen_history_id = Some(id);
                 self.hoen_heartbeat = Some(Instant::now());
-                !crate::hoen::host::disabled() && matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) && !crate::hoen::host::disabled() && context.guard.is_current()
+                !crate::hoen::host::disabled() && matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) && !crate::hoen::host::disabled()
             }
             Err(crate::hoen::history_worker::WorkerError::Unconfirmed) => {
                 let history = history.clone();

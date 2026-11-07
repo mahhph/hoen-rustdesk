@@ -3,7 +3,6 @@ use super::{
     history_worker::HistoryWorker,
     mailbox_worker::MailboxWorker,
     network,
-    network_monitor::NetworkMonitor,
 };
 use hbb_common::{
     anyhow::{anyhow, bail},
@@ -27,7 +26,6 @@ pub(crate) struct Runtime {
     pub policy: network::Policy,
     pub listen_port: u16,
     pub history: Option<HistoryWorker>,
-    pub monitor: Arc<NetworkMonitor>,
     registration: Registration,
 }
 
@@ -413,12 +411,6 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     if hosting && !enrollment.hosting_enabled {
         bail!("mailbox hosting is disabled");
     }
-    let monitor = Arc::new(
-        NetworkMonitor::start()
-            .await
-            .map_err(|_| anyhow!("network monitoring unavailable"))?,
-    );
-    let captured = monitor.state();
     let mailbox_url = url::Url::parse(&enrollment.mailbox_url)?;
     let local_address = hbb_common::tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -431,9 +423,6 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     spawn_blocking(move || network::verify_binding(Some(&check_policy), address))
         .await?
         .map_err(|_| anyhow!("the configured bind address is not available"))?;
-    if !monitor.is_current(captured) {
-        bail!("network changed during enrollment validation");
-    }
     let mailbox = MailboxWorker::start_with_pin(
         enrollment.mailbox_url.clone(),
         enrollment.mailbox_ca_pem.as_bytes().to_vec(),
@@ -491,7 +480,6 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
         listen_port: enrollment.listen_port,
         history,
         registration,
-        monitor,
     }))
 }
 

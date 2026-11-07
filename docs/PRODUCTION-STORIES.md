@@ -4,7 +4,7 @@ Created 2026-11-06 following user acceptance of Windows development. This is a n
 
 ## Delivery order
 
-Start PRD-01, then PRD-02 and PRD-04. PRD-03 can proceed alongside them once the release/signing environment is known. PRD-05/06 provide operational evidence; PRD-07/08 cover recovery and security lifecycle. PRD-09 is the Mac release gate. Internet discovery/relay and separate file-transfer sessions are outside this backlog. The user-waived live network-change disconnect test remains waived.
+Start PRD-01, then PRD-02 and PRD-04. PRD-03 can proceed alongside them once the release/signing environment is known. PRD-05/06 provide operational evidence; PRD-07/08 cover recovery and security lifecycle. PRD-09 is the Mac release gate. Internet discovery/relay and separate file-transfer sessions are outside this backlog. Network-change monitoring and its disconnect behavior were removed at the user's request.
 
 ## PRD-01 — Repeatable installation and firewall setup
 

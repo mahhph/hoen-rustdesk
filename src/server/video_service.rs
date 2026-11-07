@@ -731,6 +731,10 @@ fn run(vs: VideoService) -> ResultType<()> {
     let mut first_frame = true;
     // Set once the encoder emits its first packet; until then it may legitimately return nothing.
     let mut encoder_warmed_up = false;
+    #[cfg(target_os = "macos")]
+    let (mut capture_reported, mut send_reported, mut stall_reported) = (false, false, false);
+    #[cfg(target_os = "macos")]
+    let video_started = Instant::now();
     let capture_width = c.width;
     let capture_height = c.height;
     let mut static_refresh = static_refresh::StaticRefresh::new(
@@ -746,6 +750,13 @@ fn run(vs: VideoService) -> ResultType<()> {
     let (mut second_instant, mut send_counter) = (Instant::now(), 0);
 
     while sp.ok() {
+        #[cfg(target_os = "macos")]
+        if !stall_reported && !send_reported && video_started.elapsed() >= Duration::from_secs(10) {
+            hbb_common::throttled_log!(Duration::from_secs(30), warn,
+                "Mac video first frame pending: display={}, captured={}, encoder_output={}",
+                display_idx, capture_reported, encoder_warmed_up);
+            stall_reported = true;
+        }
         #[cfg(windows)]
         check_uac_switch(c.privacy_mode_id, c._capturer_privacy_mode_id)?;
         check_qos(
@@ -819,6 +830,12 @@ fn run(vs: VideoService) -> ResultType<()> {
             Ok(frame) => {
                 repeat_encode_counter = 0;
                 if frame.valid() {
+                    #[cfg(target_os = "macos")]
+                    if !capture_reported {
+                        hbb_common::throttled_log!(Duration::from_secs(30), warn,
+                            "Mac video captured first frame: display={}", display_idx);
+                        capture_reported = true;
+                    }
                     let screenshot_key = (vs.source, display_idx);
                     let screenshot = SCREENSHOTS.lock().unwrap().remove(&screenshot_key);
                     if let Some(mut screenshot) = screenshot {
@@ -881,6 +898,13 @@ fn run(vs: VideoService) -> ResultType<()> {
                         capture_width,
                         capture_height,
                     )?;
+                    #[cfg(target_os = "macos")]
+                    if !send_reported && !result.send_conn_ids.is_empty() {
+                        hbb_common::throttled_log!(Duration::from_secs(30), warn,
+                            "Mac video sent first frame: display={}, recipients={}",
+                            display_idx, result.send_conn_ids.len());
+                        send_reported = true;
+                    }
                     static_refresh.on_frame_encoded(&result);
                     frame_controller.set_send(now, result.send_conn_ids);
                     send_counter += 1;

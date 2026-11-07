@@ -285,7 +285,7 @@ tokio = { version = "1.44", features = ["test-util"] }
 name = "RustDesk"
 identifier = "com.carriez.rustdesk"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
-osx_minimum_system_version = "10.14"
+osx_minimum_system_version = "12.3"
 
 #https://github.com/johnthagen/min-sized-rust
 [profile.release]

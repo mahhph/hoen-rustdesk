@@ -311,7 +311,33 @@ impl RendezvousMediator {
         log::info!("server restart");
     }
 
-    #[cfg(feature = "hoen-mailbox")]
+    #[cfg(all(feature = "hoen-mailbox", target_os = "macos"))]
+    pub async fn start_all() {
+        let mut initialized = false;
+        loop {
+            // A disabled host is not a completed service: keep the existing
+            // logged-in app alive so that re-enabling it can start hosting.
+            while crate::hoen::host::disabled() {
+                sleep(3.).await;
+            }
+            // Initialize once before retrying the listener. In particular, a
+            // denied Keychain request must not turn into repeated prompts.
+            // The cached runtime also keeps exactly one history worker alive.
+            if !initialized {
+                if let Err(error) = crate::hoen::runtime::host().await {
+                    log::error!("Mailbox host initialization failed: {error}");
+                    return;
+                }
+                initialized = true;
+            }
+            if let Err(error) = crate::hoen::host::run().await {
+                log::warn!("Mailbox host unavailable; retrying in 15 seconds: {error}");
+                sleep(15.).await;
+            }
+        }
+    }
+
+    #[cfg(all(feature = "hoen-mailbox", not(target_os = "macos")))]
     pub async fn start_all() {
         if let Err(error) = crate::hoen::host::run().await {
             log::error!("Mailbox host unavailable: {error}");

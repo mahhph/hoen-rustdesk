@@ -25,6 +25,10 @@ pub(crate) async fn run() -> ResultType<()> {
         return Ok(());
     }
     let runtime = super::runtime::host().await?;
+    #[cfg(target_os = "macos")]
+    hbb_common::log::warn!("Mac host permissions: accessibility={}, screen_recording={}",
+        crate::platform::macos::is_process_trusted(false),
+        crate::platform::macos::is_can_screen_recording(false));
     let addr = SocketAddr::new(runtime.policy.local_address, runtime.listen_port);
     let policy = runtime.policy.clone();
     spawn_blocking(move || network::verify_binding(Some(&policy), addr))

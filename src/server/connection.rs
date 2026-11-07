@@ -379,7 +379,7 @@ pub struct Connection {
     #[cfg(feature = "hoen-mailbox")]
     hoen_grant: Option<hoen_mailbox_auth::mailbox::ConsumedGrant>,
     #[cfg(feature = "hoen-mailbox")]
-    hoen_history_id: Option<uuid::Uuid>,
+    hoen_history: Option<crate::hoen::history_worker::HistorySession>,
     #[cfg(feature = "hoen-mailbox")]
     hoen_heartbeat: Option<Instant>,
     #[cfg(feature = "hoen-mailbox")]
@@ -610,7 +610,7 @@ impl Connection {
             #[cfg(feature = "hoen-mailbox")]
             hoen_grant: None,
             #[cfg(feature = "hoen-mailbox")]
-            hoen_history_id: None,
+            hoen_history: None,
             #[cfg(feature = "hoen-mailbox")]
             hoen_heartbeat: None,
             #[cfg(feature = "hoen-mailbox")]
@@ -1220,11 +1220,7 @@ impl Connection {
                 }
                 _ = second_timer.tick() => {
                     #[cfg(feature = "hoen-mailbox")]
-                    if let Some(context) = conn.hoen.clone() {
-                        if !matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) {
-                            conn.on_close("network error", false).await;
-                            break;
-                        }
+                    if conn.hoen.is_some() {
                         if hoen_seen {
                             hoen_seen = false;
                             last_recv_time = Instant::now();
@@ -2276,9 +2272,10 @@ impl Connection {
         }
         #[cfg(feature = "hoen-mailbox")]
         if self.hoen.is_some() {
-            if !self.is_remote() || !res.has_peer_info() || !self.hoen_begin_history().await {
+            if !self.is_remote() || !res.has_peer_info() {
                 return false;
             }
+            self.hoen_begin_history();
         }
         let mut msg_out = Message::new();
         msg_out.set_login_response(res);
@@ -3004,51 +3001,33 @@ impl Connection {
     }
 
     #[cfg(feature = "hoen-mailbox")]
-    async fn hoen_begin_history(&mut self) -> bool {
-        let Some(context) = self.hoen.as_ref() else { return false; };
-        let Some(history) = context.runtime.history.as_ref() else { return false; };
-        let Some(grant) = self.hoen_grant.as_ref() else { return false; };
-        if !matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) { return false; }
-        let start = match crate::hoen::history_worker::SessionStart::new(grant) {
-            Ok(start) => start,
-            Err(_) => return false,
+    fn hoen_begin_history(&mut self) {
+        let Some(context) = self.hoen.as_ref() else { return; };
+        let Some(grant) = self.hoen_grant.as_ref() else { return; };
+        let Some(history) = context.runtime.history.as_ref().and_then(|cell| cell.get()) else {
+            hbb_common::log::warn!("Session history unavailable; authenticated connection continues");
+            return;
         };
-        match history.begin(&start).await {
-            Ok(id) => {
-                self.hoen_history_id = Some(id);
+        match history.begin_best_effort(grant) {
+            Ok(session) => {
+                self.hoen_history = Some(session);
                 self.hoen_heartbeat = Some(Instant::now());
-                !crate::hoen::host::disabled() && matches!(time::timeout(Duration::from_secs(3), context.guard.recheck()).await, Ok(Ok(()))) && !crate::hoen::host::disabled()
             }
-            Err(crate::hoen::history_worker::WorkerError::Unconfirmed) => {
-                let history = history.clone();
-                let id = start.session_id();
-                hbb_common::tokio::spawn(async move {
-                    let intent = crate::hoen::history_worker::HistoryIntent::failed(id, hoen_mailbox_history::Reason::HostError);
-                    if history.record(&intent).await.is_err() { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history admission outcome unavailable"); }
-                });
-                hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history admission unconfirmed; connection refused");
-                false
-            }
-            Err(_) => { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history unavailable; connection refused"); false }
+            Err(error) => hbb_common::log::warn!("Session history unavailable; authenticated connection continues: {error}"),
         }
     }
 
     #[cfg(feature = "hoen-mailbox")]
     async fn hoen_record_heartbeat(&mut self) {
-        let (Some(context), Some(id), Some(last)) = (&self.hoen, self.hoen_history_id, self.hoen_heartbeat) else { return; };
+        let (Some(session), Some(last)) = (&self.hoen_history, self.hoen_heartbeat) else { return; };
         if last.elapsed() < Duration::from_secs(60) { return; }
-        let Some(history) = context.runtime.history.clone() else { return; };
         self.hoen_heartbeat = Some(Instant::now());
-        hbb_common::tokio::spawn(async move {
-            let intent = crate::hoen::history_worker::HistoryIntent::heartbeat(id);
-            if history.record(&intent).await.is_err() { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history heartbeat unavailable"); }
-        });
+        session.heartbeat();
     }
 
     #[cfg(feature = "hoen-mailbox")]
     async fn hoen_end_history(&mut self, reason: &str) {
-        let (Some(context), Some(id)) = (&self.hoen, self.hoen_history_id.take()) else { return; };
-        let Some(history) = context.runtime.history.clone() else { return; };
+        let Some(session) = self.hoen_history.take() else { return; };
         let (failed, reason) = match reason {
             "Peer close" => (false, hoen_mailbox_history::Reason::UserDisconnect),
             "network error" | "Reset by the peer" => (true, hoen_mailbox_history::Reason::NetworkError),
@@ -3058,17 +3037,7 @@ impl Connection {
             "End" => (false, hoen_mailbox_history::Reason::Normal),
             _ => (true, hoen_mailbox_history::Reason::HostError),
         };
-        self.hoen_terminal = Some(hbb_common::tokio::spawn(async move {
-            let intent = if failed { crate::hoen::history_worker::HistoryIntent::failed(id, reason) }
-                else { crate::hoen::history_worker::HistoryIntent::ended(id, reason) };
-            loop {
-                match history.record(&intent).await {
-                    Ok(()) => break,
-                    Err(crate::hoen::history_worker::WorkerError::QueueFull | crate::hoen::history_worker::WorkerError::Unconfirmed) => time::sleep(Duration::from_secs(1)).await,
-                    Err(_) => { hbb_common::throttled_log!(Duration::from_secs(60), warn, "Mailbox history termination unavailable"); break; }
-                }
-            }
-        }));
+        self.hoen_terminal = Some(session.finish(failed, reason));
     }
 
     async fn on_message(&mut self, msg: Message) -> bool {

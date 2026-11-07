@@ -19,6 +19,12 @@
 // https://slhck.info/video/2017/03/01/rate-control.html
 
 use super::{display_service::check_display_changed, service::ServiceTmpl, video_qos::VideoQoS, *};
+#[cfg(target_os = "macos")]
+static MAC_CAPTURED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(target_os = "macos")]
+static MAC_ENCODED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(target_os = "macos")]
+static MAC_QUEUED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 #[cfg(target_os = "linux")]
 use crate::common::SimpleCallOnReturn;
 #[cfg(target_os = "linux")]
@@ -735,6 +741,8 @@ fn run(vs: VideoService) -> ResultType<()> {
     let (mut capture_reported, mut send_reported, mut stall_reported) = (false, false, false);
     #[cfg(target_os = "macos")]
     let video_started = Instant::now();
+    #[cfg(target_os = "macos")]
+    let mut last_video_counts = Instant::now();
     let capture_width = c.width;
     let capture_height = c.height;
     let mut static_refresh = static_refresh::StaticRefresh::new(
@@ -750,6 +758,15 @@ fn run(vs: VideoService) -> ResultType<()> {
     let (mut second_instant, mut send_counter) = (Instant::now(), 0);
 
     while sp.ok() {
+        #[cfg(target_os = "macos")]
+        if last_video_counts.elapsed() >= Duration::from_secs(10) {
+            use std::sync::atomic::Ordering;
+            hbb_common::throttled_log!(Duration::from_secs(10), warn,
+                "Mac video process totals: captured={}, encoded={}, queued_to_viewer={}",
+                MAC_CAPTURED.load(Ordering::Relaxed), MAC_ENCODED.load(Ordering::Relaxed),
+                MAC_QUEUED.load(Ordering::Relaxed));
+            last_video_counts = Instant::now();
+        }
         #[cfg(target_os = "macos")]
         if !stall_reported && !send_reported && video_started.elapsed() >= Duration::from_secs(10) {
             hbb_common::throttled_log!(Duration::from_secs(30), warn,
@@ -830,6 +847,8 @@ fn run(vs: VideoService) -> ResultType<()> {
             Ok(frame) => {
                 repeat_encode_counter = 0;
                 if frame.valid() {
+                    #[cfg(target_os = "macos")]
+                    MAC_CAPTURED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     #[cfg(target_os = "macos")]
                     if !capture_reported {
                         hbb_common::throttled_log!(Duration::from_secs(30), warn,
@@ -1326,6 +1345,8 @@ fn handle_one_frame(
     *first_frame = false;
     match encoder.encode_to_message(frame, ms) {
         Ok(mut vf) => {
+            #[cfg(target_os = "macos")]
+            MAC_ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             *encode_fail_counter = 0;
             *encoder_warmed_up = true;
             vf.display = display as _;
@@ -1337,6 +1358,10 @@ fn handle_one_frame(
                 .as_mut()
                 .map(|r| r.write_message(&msg, width, height));
             send_conn_ids = sp.send_video_frame(msg);
+            #[cfg(target_os = "macos")]
+            if !send_conn_ids.is_empty() {
+                MAC_QUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         Err(e) => {
             vpx_no_output = e.is::<scrap::VpxNoOutput>();

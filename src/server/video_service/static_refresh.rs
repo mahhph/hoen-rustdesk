@@ -274,6 +274,8 @@ impl<'a> StaticRefresh<'a> {
                 }
             };
             self.repeat_output_counter += 1;
+            #[cfg(target_os = "macos")]
+            super::MAC_ENCODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.repeat_failures = 0;
             vf.display = self.display_idx as _;
             let mut msg = Message::new();
@@ -284,6 +286,10 @@ impl<'a> StaticRefresh<'a> {
                 .as_mut()
                 .map(|r| r.write_message(&msg, self.width, self.height));
             let send_conn_ids = self.sp.send_video_frame(msg);
+            #[cfg(target_os = "macos")]
+            if !send_conn_ids.is_empty() {
+                super::MAC_QUEUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             frame_controller.set_send(now, send_conn_ids);
             // Static refinement must not count as motion for adaptive bitrate.
         }

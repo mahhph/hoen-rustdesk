@@ -1289,6 +1289,14 @@ pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
     crate::platform::windows::try_change_desktop();
     let buttons = evt.mask >> 3;
     let evt_type = evt.mask & MOUSE_TYPE_MASK;
+    #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+    if evt_type == MOUSE_TYPE_DOWN {
+        static REPORTED_BUTTON: AtomicBool = AtomicBool::new(false);
+        if !REPORTED_BUTTON.swap(true, Ordering::Relaxed) {
+            log::warn!("Mac remote input: button reached system input handler, accessibility={}",
+                crate::platform::macos::is_process_trusted(false));
+        }
+    }
     let mut en = ENIGO.lock().unwrap();
     #[cfg(target_os = "macos")]
     en.set_ignore_flags(enigo_ignore_flags());

@@ -408,6 +408,10 @@ fn resolve_local_address(mailbox_url: &url::Url) -> ResultType<IpAddr> {
 
 async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>> {
     let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
+    initialize_loaded(&enrollment, history_path, hosting).await
+}
+
+async fn initialize_loaded(enrollment: &Enrollment, history_path: PathBuf, hosting: bool) -> ResultType<Arc<Runtime>> {
     let leaf_pin = enrollment.mailbox_leaf_fingerprint.as_deref()
         .map(Fingerprint::parse).transpose()?.map(|pin| *pin.as_bytes());
     if hosting && !enrollment.hosting_enabled {
@@ -444,22 +448,6 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     let identity = Identity::new(&enrollment.identity)?;
     let (public, signing_key) = sign::keypair_from_seed(&sign::Seed(enrollment.signing_seed));
     let fingerprint = Fingerprint::from_bytes(Sha256::digest(public.0).into());
-    let history = if hosting {
-        let token = ApiToken::new(enrollment.access_token.clone())?;
-        Some(
-            HistoryWorker::start_with_pin(
-                history_path,
-                4096,
-                enrollment.mailbox_url.clone(),
-                enrollment.mailbox_ca_pem.as_bytes().to_vec(),
-                move || Ok(token),
-                leaf_pin,
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
     let existing = mailbox
         .list()
         .await?
@@ -483,6 +471,15 @@ async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>>
     if existing.is_none() {
         mailbox.register(registration.clone()).await?;
     }
+    // Start the durable worker only after fallible mailbox setup. Otherwise a
+    // failed startup retry could overlap workers on the same outbox.
+    let history = if hosting {
+        let token = ApiToken::new(enrollment.access_token.clone())?;
+        Some(HistoryWorker::start_with_pin(
+            history_path, 4096, enrollment.mailbox_url.clone(),
+            enrollment.mailbox_ca_pem.as_bytes().to_vec(), move || Ok(token), leaf_pin,
+        ).await?)
+    } else { None };
     Ok(Arc::new(Runtime {
         identity,
         mailbox,
@@ -500,6 +497,22 @@ static HOST: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 #[cfg(windows)]
 static MACHINE: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 
+#[cfg(target_os = "macos")]
+async fn retry_host_initialization<T, F, Fut>(mut attempt: F, delay: std::time::Duration) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ResultType<Option<T>>>,
+{
+    loop {
+        match attempt().await {
+            Ok(Some(value)) => return value,
+            Ok(None) => {}, // Hosting is intentionally disabled.
+            Err(error) => hbb_common::log::warn!("Mac host initialization unavailable; retrying: {error}"),
+        }
+        hbb_common::tokio::time::sleep(delay).await;
+    }
+}
+
 pub(crate) async fn viewer() -> ResultType<Arc<Runtime>> {
     Ok(VIEWER
         .get_or_try_init(|| initialize(Purpose::Viewer, false))
@@ -508,7 +521,23 @@ pub(crate) async fn viewer() -> ResultType<Arc<Runtime>> {
 }
 pub(crate) async fn host() -> ResultType<Arc<Runtime>> {
     Ok(HOST
-        .get_or_try_init(|| initialize(Purpose::HostService, true))
+        .get_or_try_init(|| async {
+            #[cfg(target_os = "macos")]
+            {
+                // Load protected enrollment once: a temporary network outage
+                // must not cause repeated Keychain prompts or lose the host.
+                let (enrollment, history_path) = spawn_blocking(|| load(Purpose::HostService)).await??;
+                if !enrollment.hosting_enabled { bail!("mailbox hosting is disabled"); }
+                let enrollment = &enrollment;
+                let history_path = &history_path;
+                Ok(retry_host_initialization(|| async {
+                    if super::host::disabled() { return Ok(None); }
+                    initialize_loaded(enrollment, history_path.clone(), true).await.map(Some)
+                }, std::time::Duration::from_secs(15)).await)
+            }
+            #[cfg(not(target_os = "macos"))]
+            initialize(Purpose::HostService, true).await
+        })
         .await?
         .clone())
 }
@@ -522,6 +551,28 @@ pub(crate) async fn machine_for_service() -> ResultType<Arc<Runtime>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[hbb_common::tokio::test]
+    async fn host_initialization_retries_temporary_failure_and_disabled_state() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let attempts = AtomicUsize::new(0);
+        let value = hbb_common::tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            retry_host_initialization(|| {
+                let index = attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    match index {
+                        0 => Err(anyhow!("temporary network failure")),
+                        1 => Ok(None),
+                        _ => Ok(Some(42)),
+                    }
+                }
+            }, std::time::Duration::from_millis(1)),
+        ).await.unwrap();
+        assert_eq!(value, 42);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

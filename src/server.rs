@@ -710,6 +710,17 @@ pub async fn start_server(is_server: bool, no_server: bool) {
     #[cfg(all(windows, feature = "hoen-mailbox"))]
     let is_server = is_server && crate::is_server();
     if is_server {
+        // Acquire the Mac host's local control socket before starting any
+        // listener. A second host must never close an existing user's app or
+        // advertise itself while another process owns the control socket.
+        #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+        let hoen_ipc = match crate::ipc::new_listener("").await {
+            Ok(listener) => listener,
+            Err(error) => {
+                log::error!("Local hosting unavailable: failed to start IPC listener: {error:#}");
+                return;
+            }
+        };
         #[cfg(windows)]
         if !crate::is_server() {
             if let Err(err) = start_gui_ipc().await {
@@ -718,6 +729,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             }
         }
         crate::common::set_server_running(true);
+        #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+        tokio::spawn(crate::ipc::start_with_listener("", hoen_ipc));
+        #[cfg(not(all(target_os = "macos", feature = "hoen-mailbox")))]
         if !cfg!(windows) || crate::is_server() {
             std::thread::spawn(move || {
                 if let Err(err) = crate::ipc::start("") {
@@ -1032,6 +1046,46 @@ pub async fn stop_main_window_process() {
         if let Err(e) = crate::platform::try_kill_rustdesk_main_window_process() {
             log::error!("kill failed: {}", e);
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos", feature = "hoen-mailbox"))]
+mod mac_host_startup_tests {
+    use std::{process::Command, time::Duration};
+
+    #[test]
+    fn duplicate_host_leaves_existing_ipc_owner_running() {
+        const CHILD: &str = "HOEN_MAC_IPC_COLLISION_TEST";
+        if let Ok(name) = std::env::var(CHILD) {
+            let suffix = name.strip_prefix("hoen-ipc-test-").expect("test IPC namespace");
+            assert!(!suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()));
+            *hbb_common::config::APP_NAME.write().unwrap() = name;
+            let path = hbb_common::config::Config::ipc_path("");
+            let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all().build().unwrap();
+                runtime.block_on(async {
+                    let listener = crate::ipc::new_listener("").await.unwrap();
+                    ready_tx.send(()).unwrap();
+                    crate::ipc::start_with_listener("", listener).await;
+                });
+            });
+            ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            super::start_server(true, false);
+            assert!(!crate::common::is_server_running());
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all().build().unwrap();
+            assert!(runtime.block_on(crate::ipc::connect(1000, "")).is_ok());
+            let _ = std::fs::remove_dir_all(std::path::Path::new(&path).parent().unwrap());
+            return;
+        }
+        let name = format!("hoen-ipc-test-{}", std::process::id());
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "server::mac_host_startup_tests::duplicate_host_leaves_existing_ipc_owner_running", "--nocapture"])
+            .env(CHILD, name)
+            .status().unwrap();
+        assert!(status.success(), "isolated collision test failed: {status}");
     }
 }
 

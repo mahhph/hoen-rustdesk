@@ -3423,6 +3423,20 @@ impl Connection {
                     if self.is_authed_view_camera_conn() {
                         return true;
                     }
+                    #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+                    {
+                        static REPORTED_MOUSE: AtomicBool = AtomicBool::new(false);
+                        static REPORTED_BUTTON: AtomicBool = AtomicBool::new(false);
+                        let button = (me.mask & crate::input::MOUSE_TYPE_MASK)
+                            == crate::input::MOUSE_TYPE_DOWN;
+                        let reported = if button { &REPORTED_BUTTON } else { &REPORTED_MOUSE };
+                        if !reported.swap(true, Ordering::Relaxed) {
+                            log::warn!("Mac remote input: kind={}, host_control={}, viewer_disabled_control={}, accessibility={}, screen_recording={}",
+                                if button { "button" } else { "pointer" }, self.keyboard,
+                                self.disable_keyboard, crate::platform::macos::is_process_trusted(false),
+                                crate::platform::macos::is_can_screen_recording(false));
+                        }
+                    }
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     if let Err(e) = call_main_service_pointer_input("mouse", me.mask, me.x, me.y) {
                         log::debug!("call_main_service_pointer_input fail:{}", e);
@@ -5278,6 +5292,8 @@ impl Connection {
         if let Ok(q) = o.disable_keyboard.enum_value() {
             if q != BoolOption::NotSet {
                 self.disable_keyboard = q == BoolOption::Yes;
+                #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+                log::warn!("Mac remote input: viewer_disabled_control={}", self.disable_keyboard);
                 if let Some(s) = self.server.upgrade() {
                     s.write().unwrap().subscribe(
                         super::clipboard_service::NAME,

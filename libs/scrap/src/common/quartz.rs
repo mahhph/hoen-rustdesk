@@ -26,7 +26,10 @@ impl Capturer {
                 }
             },
         )
-        .map_err(|_| io::Error::from(io::ErrorKind::Other))?;
+        .map_err(|error| {
+            hbb_common::log::error!("Mac display capture start failed: {error:?}");
+            io::Error::new(io::ErrorKind::Other, format!("display capture start failed: {error:?}"))
+        })?;
 
         Ok(Capturer {
             inner,

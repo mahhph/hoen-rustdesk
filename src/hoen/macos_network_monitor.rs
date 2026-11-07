@@ -53,9 +53,28 @@ extern "C" {
     fn read(fd: i32, buffer: *mut c_void, length: usize) -> isize;
     fn close(fd: i32) -> i32;
 }
-unsafe extern "C" fn changed(_: Store, _: CFArrayRef, info: *mut c_void) {
+// Wi-Fi telemetry changes frequently without a change to the link or route.
+// Keep every other notification conservative, including unknown keys.
+fn configuration_key_relevant(key: &str) -> bool {
+    if let Some(interface) = key.strip_prefix("State:/Network/Interface/") {
+        if let Some((_, property)) = interface.split_once('/') {
+            if property == "LinkQuality" || property == "AirPort" || property.starts_with("AirPort/") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+unsafe extern "C" fn changed(_: Store, keys: CFArrayRef, info: *mut c_void) {
     // The run-loop source is removed and the store released before this borrowed pointer expires.
     let shared = &*(info as *const Arc<Shared>);
+    if !keys.is_null() {
+        let keys = CFArray::<CFString>::wrap_under_get_rule(keys);
+        if keys.len() != 0 && keys.iter().all(|key| !configuration_key_relevant(&key.to_string())) {
+            return;
+        }
+    }
     hbb_common::throttled_log!(Duration::from_secs(30), info, "Mac network configuration changed");
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.invalidate())).is_err() {
         shared.close_fast();
@@ -327,5 +346,31 @@ mod tests {
             );
         }
         assert_ne!(shared.state(), initial);
+    }
+
+    #[test]
+    fn wifi_telemetry_does_not_invalidate_but_connectivity_changes_do() {
+        for key in ["State:/Network/Interface/en0/LinkQuality",
+                    "State:/Network/Interface/en0/AirPort",
+                    "State:/Network/Interface/en0/AirPort/Busy"] {
+            assert!(!configuration_key_relevant(key), "{key}");
+        }
+        for key in ["State:/Network/Interface/en0/Link",
+                    "State:/Network/Service/example/IPv4",
+                    "State:/Network/Global/IPv6", "unknown"] {
+            assert!(configuration_key_relevant(key), "{key}");
+        }
+        let shared = Shared::new();
+        let initial = shared.state();
+        let ignored = CFArray::from_CFTypes(&[CFString::new("State:/Network/Interface/en0/LinkQuality")]);
+        unsafe { changed(ptr::null(), ignored.as_concrete_TypeRef(), (&shared as *const Arc<Shared>).cast_mut().cast()); }
+        assert_eq!(shared.state(), initial);
+        let mixed = CFArray::from_CFTypes(&[CFString::new("State:/Network/Interface/en0/AirPort"), CFString::new("State:/Network/Interface/en0/Link")]);
+        unsafe { changed(ptr::null(), mixed.as_concrete_TypeRef(), (&shared as *const Arc<Shared>).cast_mut().cast()); }
+        assert_ne!(shared.state(), initial);
+        let before_empty = shared.state();
+        let empty = CFArray::<CFString>::from_CFTypes(&[]);
+        unsafe { changed(ptr::null(), empty.as_concrete_TypeRef(), (&shared as *const Arc<Shared>).cast_mut().cast()); }
+        assert_ne!(shared.state(), before_empty);
     }
 }

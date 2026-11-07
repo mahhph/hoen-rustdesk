@@ -64,6 +64,19 @@ Assert-Admin
     $rejected=$false; try { & $script -Action Upgrade | Out-Null } catch { $rejected=$true }
     if (-not $rejected) { throw 'Untracked payload was accepted.' }
     Remove-Item -LiteralPath (Join-Path $target 'unexpected.txt')
+    [IO.File]::WriteAllText((Join-Path $work 'unexpected.txt'),'x')
+    $rejected=$false; try { & $script -Action ArchiveRestored | Out-Null } catch { $rejected=$true }
+    if (-not $rejected) { throw 'Restored archive accepted untracked workspace data.' }
+    Remove-Item -LiteralPath (Join-Path $work 'unexpected.txt')
+    $result=(& $script -Action ArchiveRestored | Out-String).Trim()
+    $restoredArchive=$result -replace '^Recovery workspace archived at ','' -replace '; staged package retained, installed package unchanged\.$',''
+    if (-not (Test-Path -LiteralPath (Join-Path $restoredArchive 'new\rustdesk.exe')) -or
+        -not (Test-Path -LiteralPath (Join-Path $restoredArchive 'recovery.json')) -or
+        (Test-Path -LiteralPath $work) -or
+        (Get-Content -LiteralPath (Join-Path $target 'rustdesk.exe') -Raw) -cne 'old-rustdesk.exe') {
+        throw 'Restored archive did not retain the staged package and original installation.'
+    }
+    & $script -Action Stage -SourceDirectory $source -OldManifest $oldReviewed -NewManifest $newReviewed | Out-Null
     & $script -Action Upgrade | Out-Null
     $rejected=$false; try { & $script -Action Archive | Out-Null } catch { $rejected=$true }
     if (-not $rejected) { throw 'Archive without a successful-connection confirmation was accepted.' }

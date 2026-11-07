@@ -22,7 +22,9 @@ def digest(path):
     return h.hexdigest()
 
 
-def package(payload, manifest_path, output, revision):
+def package(payload, manifest_path, output, revision, signing="unsigned"):
+    if signing not in ("unsigned", "self-signed"):
+        raise ValueError("Unsupported signing designation")
     if len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision):
         raise ValueError("Payload revision must be a full lowercase Git commit ID")
     payload = payload.resolve(strict=True)
@@ -59,7 +61,7 @@ def package(payload, manifest_path, output, revision):
     if output.resolve().is_relative_to(payload):
         raise ValueError("Output must be outside the payload")
     metadata = {"format": 1, "product": "Remote Desktop", "payload_source_revision": revision,
-                "signing": "unsigned", "note": "The revision is supplied by the packager and is not independently verified."}
+                "signing": signing, "note": "The revision and signing designation are supplied by the packager and are not independently verified."}
     with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for _, (name, path) in sorted(actual.items()):
             archive.write(path, "payload/" + name.replace("\\", "/"))
@@ -79,8 +81,9 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--payload-revision", required=True)
+    parser.add_argument("--signing", choices=("unsigned", "self-signed"), default="unsigned")
     args = parser.parse_args()
-    print(f"SHA-256 {package(args.payload, args.manifest, args.output, args.payload_revision)}")
+    print(f"SHA-256 {package(args.payload, args.manifest, args.output, args.payload_revision, args.signing)}")
 
 
 if __name__ == "__main__":

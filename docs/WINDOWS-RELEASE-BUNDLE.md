@@ -1,8 +1,8 @@
 # Remote Desktop Windows release bundle
 
-This is an unsigned, experimental administrator bundle, not a finished graphical installer. Windows may show an unknown-publisher warning. Obtain its SHA-256 through a separately trusted release channel and compare it before extracting; a checksum distributed only alongside a modified bundle does not authenticate it.
+This is an experimental administrator bundle, not a finished graphical installer. `release.json` states whether the packager designated the payload unsigned or self-signed; this designation is not itself signature verification. A self-signed development certificate is not trusted by Windows by default, and Windows may block the application or show a publisher warning. Obtain the ZIP SHA-256 and any certificate fingerprint through a separately trusted channel and verify them before running; a checksum distributed only alongside a modified bundle does not authenticate it.
 
-The bundle contains the application, its reviewed payload manifest and installation scripts. It does not contain enrollment credentials or host configuration. `release.json` records the payload source revision supplied by the packager; it is not proof that the payload was built from that revision.
+The bundle contains the application, its reviewed payload manifest and installation scripts. It does not contain enrollment credentials or host configuration. `release.json` records the payload source revision supplied by the packager; it is not proof that the payload was built from that revision. Self-signing does not guarantee all bundled third-party components are signed or that a particular application control policy will permit them.
 
 Extract to a directory accessible only to the administrator. In PowerShell, run the following from that directory to verify the included payload:
 

@@ -68,6 +68,7 @@ def package(payload, manifest_path, output, revision):
         for name in SCRIPTS:
             archive.write(ROOT / "scripts" / name, "scripts/" + name)
         archive.write(ROOT / "docs" / "WINDOWS-RELEASE-BUNDLE.md", "README.md")
+        archive.write(ROOT / "docs" / "INSTALLER-TEST-GUIDE.md", "INSTALLER-TEST-GUIDE.md")
         archive.write(ROOT / "LICENCE", "LICENCE")
     return digest(output)
 

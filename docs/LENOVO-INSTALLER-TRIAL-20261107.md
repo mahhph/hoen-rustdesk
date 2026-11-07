@@ -25,10 +25,20 @@ The user requested testing Area51's installer instead of the prepared manual upg
 | New service activation | Failed. SCM event 7000 reported an Application Control block. Code Integrity events 3077/3033 identified the installed `rustdesk.exe` as failing Enterprise signing-level requirements. |
 | Coordinator automatic recovery | Restored the original payload and restarted the service automatically. Service Running/Auto, exit codes zero; original payload hashes all matched. |
 | Local post-recovery checks | Listener returned on the registered TCP port; registered public key unchanged. |
-| Remote post-recovery connection | Requested from Area51 in mailbox message 322; pending at this checkpoint. |
+| Remote post-recovery connection | Passed: Area51 message 323 confirmed a fresh direct encrypted connection and live desktop, then disconnected. |
 
 The new application was **not successfully deployed**. The observed result validates the restored-workspace archival path and a real activation-failure recovery path. It does not establish archive restoration, fresh installation, all failure modes, or a successful new-version connection. No application-control policy was disabled or bypassed. Both prior recovery data and the rejected replacement remain retained; no enrollment credentials or history were reset.
 
 Packaging trust/signing compatibility must be resolved before repeating deployment. The earlier 2026-11-06 trial passed the upgraded-version connection (Area51 message 312), but its post-restore connection failed (message 314); that earlier round trip must not be recorded as a complete pass. Area51 subsequently reported working baseline connections in message 321.
 
 Regression surface: this checkpoint changes documentation only. Installer/runtime implementation remains owned by the corresponding source revisions.
+
+## Locally built monitoring update installed
+
+At 17:33 UTC, the locally built `8ae61d7c3779` payload was successfully installed using the same test2 upgrade coordinator with explicit reviewed local payload/manifest inputs. Previous attempts refused active sessions or a reopened client and restored the running original service without replacing its package. After the user closed sessions and left the client closed, staging, replacement and activation passed.
+
+All installed files matched the reviewed local manifest (`C64C0F86CFD42BC8982C2090DDE1F200DB33EE1782314F725F16F91DF97910F5`). The service was Running/Auto with exit code zero, the registered listener returned, and the public machine key remained unchanged. The installed GUI visibly displayed `Build: 8ae61d7c3779`, loaded the registered-machine selector and included the distinct monitor-and-arrows icon. The original working package remains retained for restore.
+
+Windows accepted this locally built unsigned executable. No certificate was imported and no application-control policy was changed. This differs from the rejected Area51 executable: the two builds have different hashes even though their source trees match. The precise Windows reputation/authorization distinction is unverified; do not claim that every unsigned build is blocked or that this proves future packages will be accepted.
+
+Area51 was asked in message 326 to verify a fresh connection to this newly installed build. That external check remains pending at this checkpoint. The local Windows client is available for user testing.

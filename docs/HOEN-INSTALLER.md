@@ -14,6 +14,12 @@ The user confirmed that the network path is not an authorization rule. Connectio
 
 ## Installer lifecycle
 
+Production hardening is tracked in [production stories](PRODUCTION-STORIES.md). The first PRD-01 increment adds `scripts/remote-desktop-firewall.ps1`, separately invoked with `-Action Validate|Configure|Remove -ListenerPort <approved-port>`. Validate is the default and does not mutate policy. Configure and Remove require elevation. The helper owns only `RemoteDesktopService.Inbound.v1`, verifies its marker and executable/port/filter scope, and refuses conflicting rules or policy-query failures. It permits the configured TCP port for the installed executable across profiles and addresses; mailbox cryptographic authentication remains the access policy. An enabled rule is not proof of remote reachability.
+
+Install now persists public `installation` metadata (schema, listener port and firewall ownership) inside its protected manifest. Activate validates the rule; uninstall removes it only if this installation created it. Pre-existing matching rules are not claimed. Legacy installations require explicit `AdoptFirewall` with a reviewed configuration digest and independently confirmed existing port while stopped/disabled; the encrypted service enrollment is not read. Existing manually configured rules, including `HoenRemoteDesktopServiceTCP42830`, are not adopted or removed. A crash between rule creation and durable metadata can leave a rule requiring administrator inspection; no crash-atomic firewall/SCM transaction is claimed.
+
+`scripts/remote-desktop-upgrade.ps1` adds protected staging, content-verified replacement and restore of the retained previous payload. Upgrade/Restore require a clean stop and no installed payload processes. These actions do not change service state, credentials, history or firewall policy; activation and post-update identity/connection verification remain explicit. See the [controlled test guide](INSTALLER-TEST-GUIDE.md), including interrupted-staging and recovery-workspace limits. Existing installer `Rollback` means uninstall, not previous-version restore.
+
 `scripts/remote-desktop-service-installer.ps1` supports these explicit actions:
 
 - `Plan` is read-only and produces the payload hash manifest. With `ExpectedManifest`, it checks the exact payload against a previously reviewed manifest.

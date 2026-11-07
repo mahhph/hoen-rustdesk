@@ -6,6 +6,10 @@ Plan is read-only and emits a JSON payload hash manifest for independent review.
 Install requires that reviewed manifest and creates only a new, disabled service.
 Activate starts the service; SCM Running does not indicate host readiness.
 Deactivate stops and disables it. Rollback removes only an unchanged disabled install.
+Legacy installs require AdoptFirewall with the SHA-256 of a reviewed approved
+configuration and an explicit confirmation that its port matches the existing
+enrollment. This installer cannot inspect the encrypted enrollment to verify it.
+Previously existing matching firewall rules are verified but never claimed or removed.
 Run in an elevated Windows PowerShell session for actions other than Plan.
 .EXAMPLE
 .\scripts\remote-desktop-service-installer.ps1 -SourceDirectory C:\build\Release
@@ -16,15 +20,19 @@ Run in an elevated Windows PowerShell session for actions other than Plan.
 .EXAMPLE
 .\scripts\remote-desktop-service-installer.ps1 -Action Deactivate
 .EXAMPLE
+.\scripts\remote-desktop-service-installer.ps1 -Action AdoptFirewall -ApprovedConfigPath C:\review\approved.json -ExpectedApprovedSha256 <reviewed-sha256> -ConfirmedExistingListenerPort
+.EXAMPLE
 .\scripts\remote-desktop-service-installer.ps1 -Action Rollback
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Plan','Install','Activate','Deactivate','Rollback')][string]$Action = 'Plan',
+    [ValidateSet('Plan','Install','Activate','Deactivate','Rollback','AdoptFirewall')][string]$Action = 'Plan',
     [string]$SourceDirectory,
     [string]$ExpectedManifest,
     [string]$ClientConfigPath,
-    [string]$ApprovedConfigPath
+    [string]$ApprovedConfigPath,
+    [string]$ExpectedApprovedSha256,
+    [switch]$ConfirmedExistingListenerPort
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -37,6 +45,7 @@ $target = [IO.Path]::GetFullPath((Join-Path $programFiles 'Remote Desktop Servic
 $binary = Join-Path $target 'rustdesk.exe'
 $serviceCommand = '"{0}" --service' -f $binary
 $scExe = Join-Path ([Environment]::SystemDirectory) 'sc.exe'
+$firewallScript = Join-Path $PSScriptRoot 'remote-desktop-firewall.ps1'
 
 function Assert-NoReparse([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
@@ -94,6 +103,49 @@ function Assert-ManifestMatches($Manifest, [object[]]$Actual) {
     for ($i=0; $i -lt $Actual.Count; $i++) {
         if ($expected[$i].path -cne $Actual[$i].path -or [long]$expected[$i].size -ne $Actual[$i].size -or $expected[$i].sha256 -cne $Actual[$i].sha256) { throw "Payload mismatch: $($Actual[$i].path)" }
     }
+}
+function Get-FirewallMetadata($Manifest) {
+    $property=$Manifest.PSObject.Properties['installation']
+    if($null -eq $property){return $null}
+    $state=$property.Value
+    if($null -eq $state -or @($state.PSObject.Properties).Count -ne 3 -or
+       $null -eq $state.PSObject.Properties['schema'] -or
+       $null -eq $state.PSObject.Properties['listenerPort'] -or
+       $null -eq $state.PSObject.Properties['firewallOwned'] -or
+       ($state.schema -isnot [int] -and $state.schema -isnot [long]) -or $state.schema -ne 1 -or
+       ($state.listenerPort -isnot [int] -and $state.listenerPort -isnot [long]) -or $state.listenerPort -lt 1 -or $state.listenerPort -gt 65535 -or
+       $state.firewallOwned -isnot [bool]) { throw 'Invalid protected firewall installation metadata.' }
+    return $state
+}
+function Read-ApprovedListenerPort([string]$Path,[string]$ExpectedSha256) {
+    if($ExpectedSha256 -notmatch '^[a-fA-F0-9]{64}$'){throw 'A reviewed approved-config SHA-256 is required.'}
+    $ExpectedSha256=$ExpectedSha256.ToLowerInvariant()
+    $stream=[IO.FileStream]::new($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {
+        if($stream.Length -le 0 -or $stream.Length -gt 131072){throw 'Invalid approved configuration size.'}
+        $bytes=[byte[]]::new([int]$stream.Length); $offset=0
+        while($offset -lt $bytes.Length){$n=$stream.Read($bytes,$offset,$bytes.Length-$offset);if($n -eq 0){throw 'Approved configuration changed while reading.'};$offset+=$n}
+        if($stream.ReadByte() -ne -1){throw 'Approved configuration changed while reading.'}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try {$digest=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+        if($digest -cne $ExpectedSha256){throw 'Approved configuration differs from the reviewed bytes.'}
+        try {$text=[Text.UTF8Encoding]::new($false,$true).GetString($bytes).TrimStart([char]0xfeff);$config=$text|ConvertFrom-Json}catch{throw 'Invalid approved configuration.'}
+        if($null -eq $config.PSObject.Properties['listen_port']){throw 'Approved listener port is missing.'}
+        $port=$config.listen_port
+        if(($port -isnot [int] -and $port -isnot [long]) -or $port -lt 1 -or $port -gt 65535){throw 'Approved listener port is invalid.'}
+        return [int]$port
+    } finally { $stream.Dispose() }
+}
+function Configure-InstallationFirewall([int]$Port) {
+    $result=& $firewallScript -Action Configure -ListenerPort $Port
+    if($result.Result -notin @('created','verified')){throw 'Unexpected firewall configuration result.'}
+    return $result.Result -eq 'created'
+}
+function Remove-OwnedFirewall([int]$Port,[bool]$Owned) {
+    if(-not $Owned){return 'not-owned'}
+    $result=& $firewallScript -Action Remove -ListenerPort $Port
+    if($result.Result -notin @('removed','absent')){throw 'Unexpected firewall removal result.'}
+    return $result.Result
 }
 function Get-OwnService {
     @(Get-CimInstance Win32_Service -Filter "Name='$serviceName'")
@@ -218,6 +270,7 @@ public static class RemoteInstallNative {
   [StructLayout(LayoutKind.Sequential)] struct SA { public int size; public IntPtr sd; public int inherit; }
   [StructLayout(LayoutKind.Sequential)] struct ATTR { public uint attributes; public uint tag; }
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateDirectoryW(string path, ref SA sa);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool MoveFileExW(string from, string to, uint flags);
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandleEx(SafeFileHandle h, int infoClass, out ATTR info, uint size);
   public static void CreateNew(string path, byte[] descriptor) {
@@ -225,6 +278,9 @@ public static class RemoteInstallNative {
     try { var sa=new SA {size=Marshal.SizeOf(typeof(SA)),sd=pin.AddrOfPinnedObject(),inherit=0};
       if(!CreateDirectoryW(path,ref sa)) throw new Win32Exception(Marshal.GetLastWin32Error());
     } finally { pin.Free(); }
+  }
+  public static void ReplaceFile(string from, string to) {
+    if(!MoveFileExW(from,to,0x9)) throw new Win32Exception(Marshal.GetLastWin32Error());
   }
   public static SafeFileHandle HoldDirectory(string path) {
     var h=CreateFileW(path,0x20080,3,IntPtr.Zero,3,0x02200000,IntPtr.Zero);
@@ -243,6 +299,36 @@ function Hold-DirectoryChain([string]$Path) {
     try { foreach ($part in $parts) { $handles.Add([RemoteInstallNative]::HoldDirectory($part)) } }
     catch { foreach ($handle in $handles) { $handle.Dispose() }; throw }
     return ,$handles
+}
+function Read-InstalledManifest([string]$Path) {
+    $stream=[IO.FileStream]::new($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {
+        if($stream.Length -le 0 -or $stream.Length -gt 4MB){throw 'Invalid installed manifest size.'}
+        $bytes=[byte[]]::new([int]$stream.Length);$offset=0
+        while($offset -lt $bytes.Length){$n=$stream.Read($bytes,$offset,$bytes.Length-$offset);if($n -eq 0){throw 'Installed manifest changed while reading.'};$offset+=$n}
+        if($stream.ReadByte() -ne -1){throw 'Installed manifest changed while reading.'}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try {$hash=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','')}finally{$sha.Dispose()}
+        $text=[Text.UTF8Encoding]::new($false,$true).GetString($bytes).TrimStart([char]0xfeff)
+        return [pscustomobject]@{Manifest=($text|ConvertFrom-Json);Sha256=$hash}
+    } finally {$stream.Dispose()}
+}
+function Write-AdoptedManifest($Manifest,[string]$Path,[string]$OriginalHash,[int]$Port,[bool]$Owned) {
+    $Manifest | Add-Member -NotePropertyName installation -NotePropertyValue ([pscustomobject]@{schema=1;listenerPort=$Port;firewallOwned=$Owned})
+    $temp=Join-Path $target ('.install-manifest-'+[Guid]::NewGuid().ToString('N')+'.tmp')
+    $created=$false
+    try {
+        $bytes=[Text.Encoding]::UTF8.GetBytes(($Manifest | ConvertTo-Json -Depth 6))
+        $stream=[IO.FileStream]::new($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        $created=$true
+        try {$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)} finally {$stream.Dispose()}
+        Assert-NoReparse $Path
+        if((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -cne $OriginalHash){throw 'Installed manifest changed during adoption.'}
+        [RemoteInstallNative]::ReplaceFile($temp,$Path)
+        $created=$false
+    } finally {
+        if($created -and (Test-Path -LiteralPath $temp)){Remove-Item -LiteralPath $temp -Force}
+    }
 }
 function Get-ManagedDirectories($Files) {
     $dirs=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -292,11 +378,12 @@ if ($Action -eq 'Plan' -or $Action -eq 'Install') {
     Require-Administrator
     if (-not $ExpectedManifest) { throw 'Install requires an independently reviewed ExpectedManifest.' }
     if (-not $ClientConfigPath) { throw 'Install requires existing mailbox and approved network configuration paths.' }
+    $approvedPort=Read-ApprovedListenerPort $ApprovedConfigPath $validatedInputs.ApprovedSha256
     Assert-NoReparse $programFiles
     if (Test-Path -LiteralPath $target) { throw 'Installation directory already exists; no upgrade or replacement is supported.' }
     if (@(Get-OwnService).Count -ne 0) { throw 'Service name already exists; refusing to modify it.' }
     Initialize-InstallNative
-    $created = $false; $serviceCreated = $false; $manifestCreated = $false
+    $created = $false; $serviceCreated = $false; $manifestCreated = $false; $firewallCreated = $false
     $copied = [Collections.Generic.List[object]]::new(); $createdDirs=[Collections.Generic.List[string]]::new()
     $held=Hold-DirectoryChain $programFiles
     try {
@@ -318,6 +405,8 @@ if ($Action -eq 'Plan' -or $Action -eq 'Install') {
             } finally { $output.Dispose() }
         }
         Assert-ManifestMatches $manifest @(Get-Payload $target)
+        $firewallCreated=Configure-InstallationFirewall $approvedPort
+        $manifest | Add-Member -NotePropertyName installation -NotePropertyValue ([pscustomobject]@{schema=1;listenerPort=$approvedPort;firewallOwned=$firewallCreated})
         $manifestBytes=[Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 6))
         $manifestStream=[IO.FileStream]::new((Join-Path $target $manifestName),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
         $manifestCreated=$true
@@ -330,6 +419,10 @@ if ($Action -eq 'Plan' -or $Action -eq 'Install') {
     } catch {
         $original = $_
         foreach ($handle in $held) { $handle.Dispose() }
+        if($firewallCreated){
+            try { Remove-OwnedFirewall $approvedPort $true | Out-Null }
+            catch { throw "Install failed and owned firewall cleanup requires review: $($_.Exception.Message). Original: $($original.Exception.Message)" }
+        }
         if (-not $serviceCreated -and @(Get-OwnService).Count -ne 0) { throw "Install failed and a service now exists; refusing automatic cleanup. Original: $($original.Exception.Message)" }
         if ($serviceCreated) {
             try { Assert-OwnService (Get-OwnService | Select-Object -First 1); & $scExe delete $serviceName | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Service deletion failed.' } } catch { throw "Install failed; service cleanup also failed: $($_.Exception.Message). Original: $($original.Exception.Message)" }
@@ -348,14 +441,41 @@ Assert-InstallSecurity $target
 $own = Get-VerifiedService
 $installedManifest = Join-Path $target $manifestName
 Assert-NoReparse $installedManifest
-$manifest = Get-Content -LiteralPath $installedManifest -Raw | ConvertFrom-Json
+$manifestSnapshot=Read-InstalledManifest $installedManifest
+$manifest=$manifestSnapshot.Manifest
 # The install manifest itself is omitted from the payload hashes.
 $actual = @(Get-SafeEntries $target | Where-Object { -not $_.PSIsContainer -and $_.FullName -ne $installedManifest })
 $rootPrefix = $target.TrimEnd('\') + '\'
 $files = @($actual | ForEach-Object { [pscustomobject]@{ path=$_.FullName.Substring($rootPrefix.Length); size=[long]$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } } | Sort-Object path)
 Assert-ManifestMatches $manifest $files
 Assert-OnlyManagedDirectories $files
+if ($Action -eq 'AdoptFirewall') {
+    if($null -ne (Get-FirewallMetadata $manifest)){throw 'Firewall installation metadata already exists.'}
+    if(-not $ApprovedConfigPath){throw 'Adoption requires a reviewed approved-config path and SHA-256.'}
+    if(-not $ConfirmedExistingListenerPort){throw 'Confirm the reviewed port matches existing encrypted enrollment; the installer cannot verify it.'}
+    Assert-OwnService (Get-VerifiedService)
+    Assert-CleanServiceStop (Get-VerifiedService)
+    Assert-NoPayloadProcesses
+    $port=Read-ApprovedListenerPort $ApprovedConfigPath $ExpectedApprovedSha256
+    $createdRule=$false
+    try {
+        $createdRule=Configure-InstallationFirewall $port
+        Write-AdoptedManifest $manifest $installedManifest $manifestSnapshot.Sha256 $port $createdRule
+    } catch {
+        $original=$_
+        if($createdRule){
+            try { Remove-OwnedFirewall $port $true | Out-Null }
+            catch { throw "Adoption failed and owned firewall cleanup requires review: $($_.Exception.Message). Original: $($original.Exception.Message)" }
+        }
+        throw $original
+    }
+    Write-Output 'Reviewed firewall configuration adopted; service remains stopped and disabled.'
+    return
+}
 if ($Action -eq 'Activate') {
+    $firewallState=Get-FirewallMetadata $manifest
+    if($null -eq $firewallState){throw 'Firewall metadata is missing; adopt a reviewed approved configuration first.'}
+    & $firewallScript -Action Validate -ListenerPort $firewallState.listenerPort | Out-Null
     Activate-OwnService
     Write-Output 'Service started with automatic startup. SCM running does not establish remote host readiness.'
     return
@@ -369,8 +489,14 @@ $stoppedService = Get-VerifiedService
 Assert-OwnService $stoppedService
 Assert-CleanServiceStop $stoppedService
 Assert-NoPayloadProcesses
+$firewallState=Get-FirewallMetadata $manifest
+if($null -eq $firewallState){throw 'Firewall metadata is missing; adopt a reviewed approved configuration first.'}
+$firewallRemoval=Remove-OwnedFirewall $firewallState.listenerPort $firewallState.firewallOwned
 & $scExe delete $serviceName | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Service deletion failed; files were retained.' }
+if ($LASTEXITCODE -ne 0) {
+    if($firewallRemoval -eq 'removed'){throw 'Service deletion failed; files were retained, but the owned firewall rule was removed.'}
+    throw 'Service deletion failed; files and any unowned firewall rule were retained.'
+}
 $held[$held.Count-1].Dispose()
 Remove-InstallFiles $files (Get-ManagedDirectories $files) $true
 Write-Output 'Removed the disabled Remote Desktop Service install.'

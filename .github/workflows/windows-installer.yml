@@ -1,0 +1,40 @@
+name: Windows installer guards
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/*remote-desktop*.ps1'
+      - '.github/workflows/windows-installer.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scripts/*remote-desktop*.ps1'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check installer, firewall and upgrade guards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $testScripts = @(
+            'test-remote-desktop-service-installer.ps1',
+            'test-remote-desktop-firewall.ps1',
+            'test-remote-desktop-installer-firewall.ps1',
+            'test-remote-desktop-upgrade.ps1'
+          )
+          foreach ($testScript in $testScripts) {
+            & '${{ matrix.shell }}' -NoProfile -ExecutionPolicy Bypass -File "./scripts/$testScript"
+            if ($LASTEXITCODE -ne 0) { throw "$testScript failed with exit code $LASTEXITCODE" }
+          }

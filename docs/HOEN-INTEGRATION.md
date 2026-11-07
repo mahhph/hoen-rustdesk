@@ -1,12 +1,12 @@
 # Hoen mailbox integration
 
-Status: implementation in progress; no integrated build or unattended acceptance result yet.
+Status (2026-11-06): the user accepted Windows development as complete after confirming connections in both directions. Mac development remains active. Historical test limits below remain evidence limits, not claims of tests that were never run.
 
 ## Decision and repositories
 
 The user approved RustDesk as the remote desktop engine on 2026-11-05. Preserve the earlier custom Rust prototype as reference; it is no longer the Phase 1 engine. Preserve RustDesk's AGPL license and notices. Changes to this fork remain available with corresponding source; the mailbox stays a separate service accessed through authenticated APIs.
 
-- Desktop host and viewer: https://github.com/mahhph/hoen-rustdesk, branch `feat/mailbox-integration`.
+- Desktop host and viewer: https://github.com/mahhph/hoen-rustdesk, branch `develop`.
 - OSS coordination/relay server: https://github.com/mahhph/hoen-rustdesk-server. Forked for future integration; no deployed Hoen service yet.
 - Mailbox: https://github.com/mahhph/hoen-agent-mailbox, existing integration branch `feat/rust-remote-desktop`.
 - Mac-specific work in this fork: proposed branch `codex/mac-mailbox-integration`.

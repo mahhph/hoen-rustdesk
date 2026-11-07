@@ -19,6 +19,14 @@ use hbb_common::{
 use hoen_mailbox_auth::mailbox::{ConsumedGrant, Identity};
 use std::{net::SocketAddr, sync::Arc};
 
+fn tcp_failure(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::ConnectionRefused => "connection refused",
+        std::io::ErrorKind::TimedOut => "connection timed out",
+        _ => "network connection failed",
+    }
+}
+
 /// A real direct socket, admitted using its OS-reported addresses. No public
 /// discovery, DNS, proxy, relay, KCP or WebRTC fallback exists in this path.
 pub(crate) struct Transport {
@@ -128,7 +136,8 @@ impl Transport {
         if captured.closed {
             bail!("network monitoring unavailable");
         }
-        let machine = mailbox.lookup(host.clone()).await?;
+        let machine = mailbox.lookup(host.clone()).await
+            .map_err(|error| anyhow!("Mailbox could not find or authorize the selected computer: {error}"))?;
         if machine.identity != host || !machine.hosting_enabled {
             bail!("mailbox host is unavailable");
         }
@@ -141,7 +150,9 @@ impl Transport {
         } else {
             TcpSocket::new_v6()?
         };
-        let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await??;
+        let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await
+            .map_err(|_| anyhow!("Could not reach the selected computer: connection timed out"))?
+            .map_err(|error| anyhow!("Could not reach the selected computer: {}", tcp_failure(error.kind())))?;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
         let policy = network::Policy {
@@ -150,7 +161,8 @@ impl Transport {
         admit(policy.clone(), local, peer).await?;
         let mut stream = Stream::from(socket, local);
         let channel =
-            handshake::viewer(&mut stream, machine.public_key_fingerprint.as_bytes()).await?;
+            handshake::viewer(&mut stream, machine.public_key_fingerprint.as_bytes()).await
+                .map_err(|_| anyhow!("Secure connection to the selected computer failed verification"))?;
         let transport = Self {
             stream,
             channel,
@@ -162,7 +174,8 @@ impl Transport {
         };
         transport.recheck().await?;
         let proof =
-            authorization::issue_proof(mailbox, &host, &transport.channel, signing_key).await?;
+            authorization::issue_proof(mailbox, &host, &transport.channel, signing_key).await
+                .map_err(|_| anyhow!("Mailbox authorization for the selected computer failed"))?;
         transport.recheck().await?;
         Ok((transport, proof))
     }
@@ -369,6 +382,13 @@ mod service_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_errors_identify_the_tcp_failure_stage() {
+        assert_eq!(tcp_failure(std::io::ErrorKind::ConnectionRefused), "connection refused");
+        assert_eq!(tcp_failure(std::io::ErrorKind::TimedOut), "connection timed out");
+        assert_eq!(tcp_failure(std::io::ErrorKind::Other), "network connection failed");
+    }
     use hbb_common::tokio::net::TcpListener;
 
     #[hbb_common::tokio::test]

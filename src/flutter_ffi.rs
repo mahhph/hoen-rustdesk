@@ -1041,6 +1041,48 @@ pub fn main_get_option(key: String) -> String {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
+        {
+            // This synchronous bridge entry is invoked on an FRB worker. Never
+            // create a nested runtime if called from an asynchronous context.
+            if hbb_common::tokio::runtime::Handle::try_current().is_err() {
+                if let Ok(runtime) = hbb_common::tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    let result = runtime.block_on(async {
+                        hbb_common::tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            crate::hoen::macos_directory::directory(),
+                        ).await
+                    });
+                    // DNS/OS work can outlive cancellation; do not let runtime
+                    // destruction block the bridge indefinitely.
+                    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+                    match result {
+                        Ok(Ok(directory)) => return directory,
+                        Ok(Err(error)) => hbb_common::throttled_log!(
+                            std::time::Duration::from_secs(30), warn,
+                            "Mac mailbox directory unavailable: {error}"
+                        ),
+                        Err(_) => hbb_common::throttled_log!(
+                            std::time::Duration::from_secs(30), warn,
+                            "Mac mailbox directory lookup timed out"
+                        ),
+                    }
+                } else {
+                    hbb_common::throttled_log!(
+                        std::time::Duration::from_secs(30), warn,
+                        "Mac mailbox directory runtime could not start"
+                    );
+                }
+            } else {
+                hbb_common::throttled_log!(
+                    std::time::Duration::from_secs(30), warn,
+                    "Mac mailbox directory called inside an async runtime"
+                );
+            }
+        }
         return r#"{"service_available":false,"error":"unavailable"}"#.into();
     }
     get_option(key)

@@ -180,3 +180,25 @@ The stock Install action is disabled in mailbox builds. Existing non-mailbox hom
 The fork's Windows launcher also has a distinct monitor-and-arrows icon, including seven embedded sizes from 16 to 256 pixels. `scripts/generate-remote-desktop-icon.ps1` regenerates the resource with Windows System.Drawing. This visual branding applies to the Windows launcher in both feature modes; it does not alter installation or connection behavior.
 
 Validation passed 43 mailbox integration tests, five Windows pipe tests, feature-on and feature-off GUI startup tests, and two Flutter widget tests covering eligible hosts, alias selection, correct connection identity, and stale selection removal on refresh failure. Analysis of the new Flutter widget/tests was clean; the existing home page retains three pre-existing deprecation notices.
+
+### Windows branch reconciliation (2026-11-06)
+
+Audited all fetched GitHub heads and local branches against `develop` at `008cc6751`. No outstanding project-owned Windows implementation change was found. Branches were retained; this audit does not delete historical work or merge unrelated upstream experiments.
+
+| Branch or checkpoint | Disposition |
+| --- | --- |
+| `feat/mailbox-integration`, `codex/mailbox-machine-picker` | Included by ancestry; UI, service broker, compact window and icons are in `develop`. |
+| `codex/area51-integrate-network-auth`, `codex/area51-lan-requirements`, `codex/area51-windows-build-guide` | Included by ancestry. |
+| `codex/refresh-address-on-login`, `codex/mac-area51-integration-seq210` | Included by ancestry, including current-address registration and shared Windows integration. |
+| `codex/area51-hoen-admission-guard` | Historical, superseded. The legacy-proof rejection remains in `develop`, with the correction in `1edec164c` that permits verified Hoen context. Its on-link-only network policy was superseded by the user's path-independent authentication requirement. Merging this branch wholesale would restore obsolete behavior. |
+| `checkpoint/windows-native-tls-validation` (`747473762`) | Historical two-case loopback TLS probe and notes, retained remotely. Superseded by the four-case production-verifier harness and evidence in `e88d4932f`, already included. No missing runtime implementation. |
+| Local `checkpoint/mailbox-adapters-99fdadb` | Patch-equivalent change already included, verified with `git cherry`; not missing implementation. |
+| `codex/mac-mailbox-integration`, `codex/mac-final-auth-seq196` | Mac work remains separate. Current PR #8 changes Mac-specific adapters/packaging; shared-file additions are macOS-gated. No outstanding Windows implementation identified there. |
+
+The other divergent heads (`clipboard-file-size`, `dxgi-reuse-staging-texture`, `fix-port-forward-kcp-lifetime`, `fix-texture-lifetime`, `fix-unzoomed-cursor-dpi`, `fix-wayland-inhibit-bundled-protocol`, `fix/macos-daemon-direct-exec`, `relay-server-check`, `sciterjs`, `svt-av1`) match upstream RustDesk branch tips exactly at audit time. They are not unmerged project changes; importing them requires a separate upstream-update review. The local untracked `src/hoen/enrollment_pipe.rs` is an unwired historical prototype and remains untouched, not part of the shipping build.
+
+The user reported successful connections in both Windows directions after Lenovo's executable-scoped TCP 42830 firewall rule was enabled. This is live connectivity evidence, not completion of unattended, clipboard or history acceptance. Machine-local firewall configuration is deployment state, not a Git branch change.
+
+### User acceptance and branch cleanup (2026-11-06)
+
+The user subsequently declared Windows development complete and accepted, and requested branch cleanup. Nineteen retired GitHub branches and four local branches were archived under `archive/windows-accepted-20261106/` tags before deletion. These tags preserve the exact historical tips, including superseded experiments; they are not release or acceptance tags. GitHub now retains `develop`, `master`, `codex/mac-mailbox-integration` (PR #8, retargeted to `develop`) and `codex/mac-final-auth-seq196` (PR #3, retained for Mac reconciliation). No active Mac work was deleted. The Windows completion automation was removed. User acceptance does not retroactively change which technical tests have recorded evidence.

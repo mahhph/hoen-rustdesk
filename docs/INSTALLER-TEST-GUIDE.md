@@ -44,7 +44,7 @@ an active matching installed-client session or another installed client/tray
 process; it never closes them. It rechecks immediately before stopping, but this
 is not an atomic session lock. The protected recovery workspace is retained and
 must not be deleted to force another upgrade. Fresh installation, legacy firewall
-adoption, workspace retirement and a user-facing installer are separate work.
+adoption and a user-facing installer are separate work.
 Synthetic guard tests are not a production-readiness claim.
 
 ```powershell
@@ -81,6 +81,6 @@ In an isolated fixture/VM, exercise interruption after the first directory move,
 
 - Service stop/start is explicit; there is no automatic deployment scheduler or session-drain protocol. A running service is not proof that no user session is active.
 - If staging fails before a complete recovery record exists, the original installation remains intact but the workspace is retained for administrator inspection. Automatic cleanup of that incomplete workspace is not implemented.
-- The workspace retains both reviewed versions. Automatic retirement/rotation for a later, different upgrade is not implemented; do not delete recovery data during this trial.
+- After verifying an end-to-end connection, an operator can run `./scripts/remote-desktop-upgrade.ps1 -Action Archive -ConfirmHealthy`. This checks the installed and previous payloads and moves the recovery workspace to a unique protected sibling directory, retaining the previous package and freeing the original workspace for a later upgrade. Record the output path. The normal `Restore` action only operates on the active workspace, so recovery from an archive requires manual investigation; archive recovery and automatic retention/rotation have not been validated. Archives consume disk space; do not delete recovery data during this trial.
 - Restoring payload files does not reverse application data-schema migrations. Test version compatibility before using a pair of releases; no credential/history rollback is attempted.
 - Mocked service tests and isolated filesystem tests do not prove live SCM behavior, effective network policy, post-upgrade desktop readiness or disaster recovery. Record those outcomes separately before closing PRD-01/02.

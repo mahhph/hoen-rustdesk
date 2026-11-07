@@ -15,8 +15,9 @@ try {
 function Assert-Admin {}
 function Assert-InstallSecurity([string]$Path) { Assert-NoReparse $Path }
 function Get-InstallSecurity { Get-Acl -LiteralPath $programFiles }
-function Get-OwnedService { return [pscustomobject]@{} }
+function Get-OwnedService { return [pscustomobject]@{State='Running';StartMode='Auto'} }
 function Assert-Quiescent { if (Test-Path -LiteralPath (Join-Path $programFiles 'busy')) { throw 'Synthetic active process.' } }
+function Assert-ArchiveUnused([string]$Path) { if (Test-Path -LiteralPath (Join-Path $programFiles 'backup-busy')) { throw 'Synthetic recovery process.' } }
 Assert-Admin
 '@
     $original=$original.Replace("`r`n","`n")
@@ -62,7 +63,28 @@ Assert-Admin
     [IO.File]::WriteAllText((Join-Path $target 'unexpected.txt'),'x')
     $rejected=$false; try { & $script -Action Upgrade | Out-Null } catch { $rejected=$true }
     if (-not $rejected) { throw 'Untracked payload was accepted.' }
-    'Upgrade: stage, busy refusal, upgrade, restore, interrupted restore and untracked refusal passed.'
+    Remove-Item -LiteralPath (Join-Path $target 'unexpected.txt')
+    & $script -Action Upgrade | Out-Null
+    $rejected=$false; try { & $script -Action Archive | Out-Null } catch { $rejected=$true }
+    if (-not $rejected) { throw 'Archive without a successful-connection confirmation was accepted.' }
+    [IO.File]::WriteAllText((Join-Path $root 'backup-busy'),'x')
+    $rejected=$false; try { & $script -Action Archive -ConfirmHealthy | Out-Null } catch { $rejected=$true }
+    if (-not $rejected) { throw 'Archive accepted an active recovery package.' }
+    Remove-Item -LiteralPath (Join-Path $root 'backup-busy')
+    [IO.File]::WriteAllText((Join-Path $work 'unexpected.txt'),'x')
+    $rejected=$false; try { & $script -Action Archive -ConfirmHealthy | Out-Null } catch { $rejected=$true }
+    if (-not $rejected) { throw 'Archive accepted untracked workspace data.' }
+    Remove-Item -LiteralPath (Join-Path $work 'unexpected.txt')
+    $result=(& $script -Action Archive -ConfirmHealthy | Out-String).Trim()
+    $archived=$result -replace '^Recovery workspace archived at ','' -replace '; previous package retained\.$',''
+    if (-not (Test-Path -LiteralPath (Join-Path $archived 'old\rustdesk.exe')) -or
+        (Test-Path -LiteralPath $work) -or
+        (Get-Content -LiteralPath (Join-Path $target 'rustdesk.exe') -Raw) -cne 'new-rustdesk.exe') {
+        throw 'Archive did not retain the old payload and leave the new payload installed.'
+    }
+    & $script -Action Stage -SourceDirectory $source -OldManifest $newReviewed -NewManifest $newReviewed | Out-Null
+    if (-not (Test-Path -LiteralPath $work)) { throw 'A later upgrade could not be staged.' }
+    'Upgrade: stage, guards, recovery, safe archive and subsequent staging passed.'
 } finally {
     $resolved=[IO.Path]::GetFullPath($root)
     $prefix=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')+'\remote-upgrade-test-'

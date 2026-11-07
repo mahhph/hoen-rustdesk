@@ -36,6 +36,17 @@ Adoption requires a cleanly stopped/disabled service and no installed payload pr
 
 ## Stage and upgrade
 
+For an existing installation with adopted firewall metadata, the experimental
+`remote-desktop-upgrade-flow.ps1` coordinates staging, session checks, service
+stop, replacement, activation and verified recovery. Supply the same reviewed
+`SourceDirectory`, `OldManifest` and `NewManifest` paths shown below. It refuses
+an active matching installed-client session or another installed client/tray
+process; it never closes them. It rechecks immediately before stopping, but this
+is not an atomic session lock. The protected recovery workspace is retained and
+must not be deleted to force another upgrade. Fresh installation, legacy firewall
+adoption, workspace retirement and a user-facing installer are separate work.
+Synthetic guard tests are not a production-readiness claim.
+
 ```powershell
 ./scripts/remote-desktop-upgrade.ps1 -Action Stage -SourceDirectory C:\review\new-payload -OldManifest C:\review\old-manifest.json -NewManifest C:\review\new-manifest.json
 ./scripts/remote-desktop-upgrade.ps1 -Action Validate

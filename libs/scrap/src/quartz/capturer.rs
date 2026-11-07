@@ -31,8 +31,10 @@ impl Capturer {
     ) -> Result<Capturer, CGError> {
         let stopped = Arc::new(Mutex::new(false));
         let cloned_stopped = stopped.clone();
-        let handler: FrameAvailableHandler = ConcreteBlock::new(move |status, _, surface, _| {
+        let handler: FrameAvailableHandler = ConcreteBlock::new(move |status, _, surface: IOSurfaceRef, _| {
             use self::CGDisplayStreamFrameStatus::*;
+            hbb_common::throttled_log!(std::time::Duration::from_secs(10), warn,
+                "Mac display stream callback: status={status:?}, surface_present={}", !surface.is_null());
             if status == Stopped {
                 let mut lock = cloned_stopped.lock().unwrap();
                 *lock = true;

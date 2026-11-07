@@ -92,6 +92,8 @@ The root task ran `flutter precache --windows` successfully, applied the checked
 
 ### Flutter package resolution
 
+The shared Flutter files and `pubspec.lock` target the Windows x64 Flutter 3.24.5 toolchain. Mac ARM development builds temporarily apply the project's Flutter 3.44 compatibility changes and use the separate `pubspec.macos-arm64.lock`, preserving the Windows baseline.
+
 The initial `flutter pub get` exited 1 because Windows Developer Mode was disabled and Flutter requires symlink support. The user enabled Developer Mode; the root task verified the setting and reran `flutter pub get` successfully (exit 0; user-local log `flutter-pub-get.log`). The application build subsequently succeeded as recorded below. Generated plugin directories are ignored, and any tracked lockfile changes require review.
 
 ### First Windows x64 application build

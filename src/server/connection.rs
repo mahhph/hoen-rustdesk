@@ -2984,6 +2984,11 @@ impl Connection {
         };
         let grant = match verified { Ok(Ok(grant)) => grant, _ => return false };
         if crate::hoen::host::disabled() { return false; }
+        #[cfg(target_os = "macos")]
+        {
+            crate::hoen::macos_display_wake::request().await;
+            if crate::hoen::host::disabled() { return false; }
+        }
         // Never retain bearer proof or password material in the cloned login/session state.
         lr.password.clear();
         lr.trusted_device_v2_token.clear();

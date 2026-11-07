@@ -31,40 +31,21 @@ fn tcp_failure(kind: std::io::ErrorKind) -> &'static str {
 pub(crate) struct Transport {
     pub stream: Stream,
     pub channel: handshake::VerifiedChannel,
-    policy: network::Policy,
-    local: SocketAddr,
-    peer: SocketAddr,
 }
 
 /// Owned by one live connection; never indexed or cached by peer identity.
 pub(crate) struct NetworkGuard {
     pub channel: handshake::VerifiedChannel,
-    policy: network::Policy,
-    local: SocketAddr,
-    peer: SocketAddr,
 }
 
 impl NetworkGuard {
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local
-    }
-    pub fn peer_addr(&self) -> SocketAddr {
-        self.peer
-    }
-    pub async fn recheck(&self) -> ResultType<()> {
-        admit(self.policy.clone(), self.local, self.peer).await?;
-        Ok(())
-    }
     pub async fn authenticate(
         &self,
         mailbox: &MailboxWorker,
         identity: &Identity,
         proof: &HoenProof,
     ) -> ResultType<ConsumedGrant> {
-        self.recheck().await?;
-        let grant = authorization::consume_proof(mailbox, identity, &self.channel, proof).await?;
-        self.recheck().await?;
-        Ok(grant)
+        authorization::consume_proof(mailbox, identity, &self.channel, proof).await
     }
 }
 
@@ -87,20 +68,10 @@ impl Transport {
             self.stream,
             NetworkGuard {
                 channel: self.channel,
-                policy: self.policy,
-                local: self.local,
-                peer: self.peer,
             },
         )
     }
-    /// Verify the socket binding before session admission.
-    pub async fn recheck(&self) -> ResultType<()> {
-        admit(self.policy.clone(), self.local, self.peer).await?;
-        Ok(())
-    }
-
     pub async fn connect(
-        _policy: network::Policy,
         mailbox: &MailboxWorker,
         host: Identity,
         signing_key: &sign::SecretKey,
@@ -132,15 +103,10 @@ impl Transport {
         let transport = Self {
             stream,
             channel,
-            policy,
-            local,
-            peer,
         };
-        transport.recheck().await?;
         let proof =
             authorization::issue_proof(mailbox, &host, &transport.channel, signing_key).await
                 .map_err(|_| anyhow!("Mailbox authorization for the selected computer failed"))?;
-        transport.recheck().await?;
         Ok((transport, proof))
     }
 
@@ -185,11 +151,7 @@ impl Transport {
         let transport = Self {
             stream,
             channel,
-            policy,
-            local,
-            peer,
         };
-        transport.recheck().await?;
         let response = match service_request(Data::HoenProofRequest(ProofRequest {
             host: host.as_str().to_owned(),
             binding: transport.channel.binding,
@@ -201,7 +163,6 @@ impl Transport {
         };
         let proof =
             checked_service_proof(response, &lookup.viewer_key, &transport.channel.binding)?;
-        transport.recheck().await?;
         Ok((transport, proof))
     }
 
@@ -219,11 +180,7 @@ impl Transport {
         let transport = Self {
             stream,
             channel,
-            policy,
-            local,
-            peer,
         };
-        transport.recheck().await?;
         Ok(transport)
     }
 
@@ -234,11 +191,7 @@ impl Transport {
         local_identity: &Identity,
         proof: &HoenProof,
     ) -> ResultType<ConsumedGrant> {
-        self.recheck().await?;
-        let result =
-            authorization::consume_proof(mailbox, local_identity, &self.channel, proof).await?;
-        self.recheck().await?;
-        Ok(result)
+        authorization::consume_proof(mailbox, local_identity, &self.channel, proof).await
     }
 }
 

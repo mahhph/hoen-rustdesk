@@ -194,7 +194,6 @@ impl<T: InvokeUiSession> Remote<T> {
         use hbb_common::anyhow::{anyhow, bail};
         let connection = self.hoen.as_ref().ok_or_else(|| anyhow!("mailbox connection is unavailable"))?;
         let proof = connection.proof.as_ref().ok_or_else(|| anyhow!("mailbox proof is no longer available"))?;
-        time::timeout(Duration::from_secs(5), connection.guard.recheck()).await??;
         let mut message = self.handler.lc.read().unwrap().create_login_msg(String::new(), String::new(), Vec::new());
         match message.union.as_mut() {
             Some(message::Union::LoginRequest(login)) if login.union.is_none() => {
@@ -272,7 +271,7 @@ impl<T: InvokeUiSession> Remote<T> {
             let (transport, proof) = {
             let runtime = crate::hoen::runtime::viewer().await?;
             crate::hoen::transport::Transport::connect(
-                runtime.policy.clone(), &runtime.mailbox, host, &runtime.signing_key,
+                &runtime.mailbox, host, &runtime.signing_key,
             ).await?
             };
             let (peer, guard) = transport.into_parts();
@@ -1899,8 +1898,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         #[cfg(feature = "hoen-mailbox")]
                         {
                             let allowed = match self.hoen.as_ref() {
-                                Some(connection) if connection.login_sent && (self.is_connected || connection.proof.is_some()) =>
-                                    matches!(time::timeout(Duration::from_secs(5), connection.guard.recheck()).await, Ok(Ok(()))),
+                                Some(connection) if connection.login_sent && (self.is_connected || connection.proof.is_some()) => true,
                                 _ => false,
                             };
                             if !allowed || !self.hoen_current() {

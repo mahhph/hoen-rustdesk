@@ -1,9 +1,8 @@
 //! Dedicated, bounded history persistence and HTTPS delivery worker.
 //!
-//! Call `begin` only after verified grant authentication and desktop initialization,
-//! immediately before admission. A successful reply confirms *local durable enqueue*,
-//! not mailbox delivery. Caller must record a terminal failure if subsequent admission
-//! fails. A lost reply is ambiguous: do not admit or retry as a new session. Pending
+//! Start recording only after verified grant authentication and desktop initialization.
+//! History is best-effort and must not delay or reject admission. A successful enqueue
+//! confirms local durable storage, not mailbox delivery. Pending
 //! outbox rows survive worker restart; missing terminal events are never fabricated.
 //! The caller must provision an access-restricted outbox directory and keep one worker
 //! per outbox. Dropping all handles stops delivery, leaving pending events on disk.
@@ -103,7 +102,60 @@ impl HistoryIntent {
         Self(Event::failed(id, reason))
     }
 }
+
+/// Serializes history for one connection without putting the worker on its login path.
+pub(crate) struct HistorySession {
+    id: Uuid,
+    sender: hbb_common::tokio::sync::mpsc::Sender<(HistoryIntent, bool)>,
+}
+impl HistorySession {
+    pub fn heartbeat(&self) {
+        if self.sender.try_send((HistoryIntent::heartbeat(self.id), false)).is_err() {
+            hbb_common::log::warn!("Session history heartbeat unavailable");
+        }
+    }
+
+    pub fn finish(self, failed: bool, reason: Reason) -> hbb_common::tokio::task::JoinHandle<()> {
+        hbb_common::tokio::spawn(async move {
+            let intent = if failed { HistoryIntent::failed(self.id, reason) }
+                else { HistoryIntent::ended(self.id, reason) };
+            if self.sender.send((intent, true)).await.is_err() {
+                hbb_common::log::warn!("Session history termination unavailable");
+            }
+        })
+    }
+}
 impl HistoryWorker {
+    pub fn begin_best_effort(&self, grant: &ConsumedGrant) -> Result<HistorySession, WorkerError> {
+        let start = SessionStart::new(grant)?;
+        let id = start.session_id();
+        let worker = self.clone();
+        let (sender, mut receiver) = hbb_common::tokio::sync::mpsc::channel::<(HistoryIntent, bool)>(8);
+        hbb_common::tokio::spawn(async move {
+            match worker.begin(&start).await {
+                Ok(_) => {},
+                Err(error) => {
+                    hbb_common::log::warn!("Session history start unavailable: {error}");
+                    return;
+                }
+            }
+            while let Some((intent, terminal)) = receiver.recv().await {
+                loop {
+                    match worker.record(&intent).await {
+                        Ok(()) => break,
+                        Err(WorkerError::QueueFull | WorkerError::Unconfirmed) if terminal =>
+                            hbb_common::tokio::time::sleep(Duration::from_secs(1)).await,
+                        Err(error) => {
+                            hbb_common::log::warn!("Session history event unavailable: {error}");
+                            break;
+                        }
+                    }
+                }
+                if terminal { break; }
+            }
+        });
+        Ok(HistorySession { id, sender })
+    }
     /// `load_token` is called and the blocking HTTPS client is created/dropped on
     /// the worker thread, never inside a Tokio runtime. It must obtain the token
     /// from the appropriate protected host identity; never use argv or logs.
@@ -308,6 +360,55 @@ fn run(mut outbox: Outbox, delivery: MailboxDelivery, receiver: Receiver<Request
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_grant() -> ConsumedGrant {
+        use hoen_mailbox_auth::mailbox::{Fingerprint, Identity};
+        ConsumedGrant {
+            viewer: Identity::new("viewer-test").unwrap(),
+            host: Identity::new("host-test").unwrap(),
+            viewer_fingerprint: Fingerprint::from_bytes([1; 32]),
+            host_fingerprint: Fingerprint::from_bytes([2; 32]),
+        }
+    }
+
+    #[hbb_common::tokio::test]
+    async fn best_effort_session_does_not_wait_for_history_and_orders_termination() {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let worker = HistoryWorker(sender);
+        let (release, wait) = mpsc::channel();
+        let fake = thread::spawn(move || {
+            let (id, reply) = match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Request::Begin(event, reply) => (event.session_id(), reply),
+                _ => panic!("expected session start"),
+            };
+            wait.recv_timeout(Duration::from_secs(5)).unwrap();
+            let _ = reply.send(Ok(id));
+            match receiver.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Request::Append(event, reply) => {
+                    assert_eq!(event.session_id(), id);
+                    assert!(matches!(event.kind(), hoen_mailbox_history::EventKind::Ended { .. }));
+                    let _ = reply.send(Ok(()));
+                }
+                _ => panic!("expected terminal event"),
+            }
+        });
+        let session = worker.begin_best_effort(&test_grant()).unwrap();
+        let finish = session.finish(false, Reason::Normal);
+        hbb_common::tokio::time::timeout(Duration::from_secs(1), finish).await.unwrap().unwrap();
+        release.send(()).unwrap();
+        hbb_common::tokio::task::spawn_blocking(move || fake.join().unwrap()).await.unwrap();
+    }
+
+    #[hbb_common::tokio::test]
+    async fn unavailable_history_does_not_block_session_setup() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+        let worker = HistoryWorker(sender);
+        let session = worker.begin_best_effort(&test_grant()).unwrap();
+        let _ = hbb_common::tokio::time::timeout(
+            Duration::from_secs(1), session.finish(false, Reason::Normal)
+        ).await.unwrap();
+    }
 
     #[hbb_common::tokio::test]
     async fn pinned_history_client_rejects_invalid_trust_before_delivery() {

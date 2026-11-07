@@ -25,14 +25,15 @@ pub(crate) struct Runtime {
     pub signing_key: sign::SecretKey,
     pub policy: network::Policy,
     pub listen_port: u16,
-    pub history: Option<HistoryWorker>,
+    pub history: Option<Arc<OnceCell<HistoryWorker>>>,
+    hosting: bool,
     registration: Registration,
 }
 
 impl Runtime {
     /// Called by the host only after the configured listener has successfully bound.
     pub async fn register_host(&self) -> ResultType<()> {
-        if self.history.is_none() {
+        if !self.hosting {
             bail!("viewer runtime cannot enable hosting");
         }
         let mut registration = self.registration.clone();
@@ -232,9 +233,6 @@ fn load_host_enrollment(directory: &std::path::Path) -> ResultType<Enrollment> {
     // Provision only protected directories; an existing credential is never replaced.
     provision_directory(parent, Purpose::HostService).map_err(|_| anyhow!("host enrollment directory unavailable"))?;
     provision_directory(directory, Purpose::HostService).map_err(|_| anyhow!("host enrollment directory unavailable"))?;
-    provision_directory(&directory.join("history"), Purpose::HostService).map_err(|_| anyhow!("history directory unavailable"))?;
-    super::credentials::validate_inheritable_directory(&directory.join("history"), Purpose::HostService)
-        .map_err(|_| anyhow!("history directory inheritance is not protected"))?;
     let store = ProtectedStore::open(directory, Purpose::HostService)
         .map_err(|_| anyhow!("host enrollment store unavailable"))?;
     let existing = store.read_optional().map_err(|_| anyhow!("host enrollment cannot be safely read"))?;
@@ -294,8 +292,8 @@ fn load_host_enrollment(directory: &std::path::Path) -> ResultType<Enrollment> {
 }
 
 #[cfg(windows)]
-fn load(purpose: Purpose) -> ResultType<(Enrollment, PathBuf)> {
-    use super::credentials::{validate_inheritable_directory, ProtectedStore};
+fn load(purpose: Purpose) -> ResultType<Enrollment> {
+    use super::credentials::ProtectedStore;
     let directory = directory(purpose)?;
     let enrollment = if purpose == Purpose::HostService {
         load_host_enrollment(&directory)?
@@ -306,12 +304,17 @@ fn load(purpose: Purpose) -> ResultType<(Enrollment, PathBuf)> {
         let secret = store.read().map_err(|_| anyhow!("mailbox enrollment cannot be decrypted by this Windows identity"))?;
         parse(secret.expose())?
     };
-    let history = directory.join("history");
-    if purpose == Purpose::HostService {
-        validate_inheritable_directory(&history, purpose)
-            .map_err(|_| anyhow!("history directory is not protected for the host service"))?;
-    }
-    Ok((enrollment, history.join("outbox.sqlite")))
+    Ok(enrollment)
+}
+
+#[cfg(windows)]
+fn prepare_history_path() -> ResultType<PathBuf> {
+    use super::credentials::{provision_directory, validate_inheritable_directory};
+    let history = directory(Purpose::HostService)?.join("history");
+    provision_directory(&history, Purpose::HostService)
+        .and_then(|_| validate_inheritable_directory(&history, Purpose::HostService))
+        .map_err(|_| anyhow!("protected history directory unavailable"))?;
+    Ok(history.join("outbox.sqlite"))
 }
 
 /// Explicit installer/bootstrap entry point. The bundle never travels in argv,
@@ -331,28 +334,24 @@ pub(crate) fn import_enrollment(
         .map_err(|_| anyhow!("cannot provision protected application directory"))?;
     provision_directory(&directory, purpose)
         .map_err(|_| anyhow!("cannot provision protected enrollment directory"))?;
-    if purpose == Purpose::HostService {
-        provision_directory(&directory.join("history"), purpose)
-            .map_err(|_| anyhow!("cannot provision protected history directory"))?;
-    }
     ProtectedStore::open(&directory, purpose)
         .and_then(|store| store.write_new(secret))
         .map_err(|_| anyhow!("cannot save enrollment for this Windows identity"))
 }
 #[cfg(target_os = "macos")]
-fn load(purpose: Purpose) -> ResultType<(Enrollment, PathBuf)> {
+fn load(purpose: Purpose) -> ResultType<Enrollment> {
     use super::credentials::MacStore;
     let store = MacStore::for_user(purpose)
         .map_err(|_| anyhow!("user Keychain unavailable for mailbox enrollment"))?;
     let secret = store.read().map_err(|_| anyhow!("protected mailbox enrollment unavailable"))?;
     let enrollment = parse(secret.expose())?;
-    let history = if purpose == Purpose::HostService {
-        let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
-        super::macos_private_dir::history(std::path::Path::new(&home))?
-    } else {
-        PathBuf::new()
-    };
-    Ok((enrollment, history))
+    Ok(enrollment)
+}
+
+#[cfg(target_os = "macos")]
+fn prepare_history_path() -> ResultType<PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
+    super::macos_private_dir::history(std::path::Path::new(&home))
 }
 
 #[cfg(target_os = "macos")]
@@ -364,10 +363,6 @@ pub(crate) fn import_enrollment(
     let _validated = parse(secret.expose())?;
     let store = MacStore::for_user(purpose)
         .map_err(|_| anyhow!("user Keychain unavailable for mailbox enrollment"))?;
-    if purpose == Purpose::HostService {
-        let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("user home unavailable"))?;
-        super::macos_private_dir::history(std::path::Path::new(&home))?;
-    }
     store.write_new(secret).map_err(|_| anyhow!("cannot create protected mailbox enrollment; an existing enrollment is not replaced"))
 }
 
@@ -391,8 +386,13 @@ pub(crate) fn provision_host_from_viewer() -> ResultType<()> {
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn load(_: Purpose) -> ResultType<(Enrollment, PathBuf)> {
+fn load(_: Purpose) -> ResultType<Enrollment> {
     bail!("protected mailbox enrollment is not implemented on this platform");
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn prepare_history_path() -> ResultType<PathBuf> {
+    bail!("protected history is not implemented on this platform");
 }
 
 fn resolve_local_address(mailbox_url: &url::Url) -> ResultType<IpAddr> {
@@ -405,11 +405,11 @@ fn resolve_local_address(mailbox_url: &url::Url) -> ResultType<IpAddr> {
 }
 
 async fn initialize(purpose: Purpose, hosting: bool) -> ResultType<Arc<Runtime>> {
-    let (enrollment, history_path) = spawn_blocking(move || load(purpose)).await??;
-    initialize_loaded(&enrollment, history_path, hosting).await
+    let enrollment = spawn_blocking(move || load(purpose)).await??;
+    initialize_loaded(&enrollment, hosting).await
 }
 
-async fn initialize_loaded(enrollment: &Enrollment, history_path: PathBuf, hosting: bool) -> ResultType<Arc<Runtime>> {
+async fn initialize_loaded(enrollment: &Enrollment, hosting: bool) -> ResultType<Arc<Runtime>> {
     let leaf_pin = enrollment.mailbox_leaf_fingerprint.as_deref()
         .map(Fingerprint::parse).transpose()?.map(|pin| *pin.as_bytes());
     if hosting && !enrollment.hosting_enabled {
@@ -463,11 +463,33 @@ async fn initialize_loaded(enrollment: &Enrollment, history_path: PathBuf, hosti
     // Start the durable worker only after fallible mailbox setup. Otherwise a
     // failed startup retry could overlap workers on the same outbox.
     let history = if hosting {
-        let token = ApiToken::new(enrollment.access_token.clone())?;
-        Some(HistoryWorker::start_with_pin(
-            history_path, 4096, enrollment.mailbox_url.clone(),
-            enrollment.mailbox_ca_pem.as_bytes().to_vec(), move || Ok(token), leaf_pin,
-        ).await?)
+        Some({
+            let cell = Arc::new(OnceCell::new());
+            let target = cell.clone();
+            let url = enrollment.mailbox_url.clone();
+            let root = enrollment.mailbox_ca_pem.as_bytes().to_vec();
+            let access_token = enrollment.access_token.clone();
+            hbb_common::tokio::spawn(async move {
+                let history_path = match spawn_blocking(prepare_history_path).await {
+                    Ok(Ok(path)) => path,
+                    _ => {
+                        hbb_common::log::warn!("Session history unavailable: protected history directory unavailable");
+                        return;
+                    }
+                };
+                let result = match ApiToken::new(access_token) {
+                    Ok(token) => HistoryWorker::start_with_pin(
+                        history_path, 4096, url, root, move || Ok(token), leaf_pin,
+                    ).await,
+                    Err(error) => Err(super::history_worker::WorkerError::Delivery(error)),
+                };
+                match result {
+                    Ok(worker) => { let _ = target.set(worker); }
+                    Err(error) => hbb_common::log::warn!("Session history unavailable: {error}"),
+                }
+            });
+            cell
+        })
     } else { None };
     Ok(Arc::new(Runtime {
         identity,
@@ -476,6 +498,7 @@ async fn initialize_loaded(enrollment: &Enrollment, history_path: PathBuf, hosti
         policy,
         listen_port: enrollment.listen_port,
         history,
+        hosting,
         registration,
     }))
 }
@@ -514,13 +537,12 @@ pub(crate) async fn host() -> ResultType<Arc<Runtime>> {
             {
                 // Load protected enrollment once: a temporary network outage
                 // must not cause repeated Keychain prompts or lose the host.
-                let (enrollment, history_path) = spawn_blocking(|| load(Purpose::HostService)).await??;
+                let enrollment = spawn_blocking(|| load(Purpose::HostService)).await??;
                 if !enrollment.hosting_enabled { bail!("mailbox hosting is disabled"); }
                 let enrollment = &enrollment;
-                let history_path = &history_path;
                 Ok(retry_host_initialization(|| async {
                     if super::host::disabled() { return Ok(None); }
-                    initialize_loaded(enrollment, history_path.clone(), true).await.map(Some)
+                    initialize_loaded(enrollment, true).await.map(Some)
                 }, std::time::Duration::from_secs(15)).await)
             }
             #[cfg(not(target_os = "macos"))]

@@ -101,22 +101,23 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
+          constraints: const BoxConstraints(maxWidth: 440),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Remote Desktop Client',
                 style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 4),
-            const Text('Build: $_buildId'),
-            const SizedBox(height: 12),
-            const Text('Select a registered machine with hosting enabled.'),
+            Text('Build: $_buildId', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            const Text('Choose a computer to connect to.'),
             if (_identity != null) ...[
-              const SizedBox(height: 8),
-              const Text('Remote Desktop Service connected'),
+              const SizedBox(height: 4),
+              Text('Remote Desktop Service connected',
+                  style: Theme.of(context).textTheme.bodySmall),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             if (_loading)
               const Text('Loading registered machines…')
             else if (_status != null)
@@ -128,6 +129,7 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
                 value: _selected,
                 decoration: const InputDecoration(
                     labelText: 'Registered machine',
+                    isDense: true,
                     border: OutlineInputBorder()),
                 isExpanded: true,
                 items: _machines
@@ -139,7 +141,7 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
                     .toList(),
                 onChanged: (value) => setState(() => _selected = value),
               ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
             Wrap(spacing: 12, children: [
               ElevatedButton(
                   onPressed: _loading || _selected == null
@@ -150,9 +152,9 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
                   onPressed: _loading ? null : _refresh,
                   child: const Text('Refresh')),
             ]),
-            const SizedBox(height: 16),
-            const Text(
-                'Registration does not indicate whether a machine is online.'),
+            const SizedBox(height: 10),
+            Text('Registered does not mean online.',
+                style: Theme.of(context).textTheme.bodySmall),
           ]),
         ),
       ),

@@ -102,4 +102,32 @@ void main() {
     await tester.tap(find.text('Connect'));
     expect(attempts, ['lenovo', 'windows']);
   });
+
+  testWidgets('compact window keeps selection and connect usable with larger text',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 340);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    String? connected;
+    await tester.pumpWidget(MaterialApp(
+      home: MediaQuery(
+        data: const MediaQueryData(size: Size(480, 340), textScaleFactor: 1.3),
+        child: Scaffold(body: MailboxHomePage(
+          loadDirectory: () async => directory,
+          connect: (id) => connected = id,
+        )),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Office').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Connect'));
+    await tester.tap(find.text('Connect'));
+    expect(connected, 'host');
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -28,6 +28,12 @@ fn primary_display_produces_a_frame() -> io::Result<()> {
             "Screen Recording permission is not granted to this test process",
         ));
     }
+    if !scrap::quartz::Display::primary().is_active() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "macOS reports the primary display is inactive; no display is available to capture",
+        ));
+    }
     let display = Display::primary()?;
     eprintln!("primary display: {}x{}", display.width(), display.height());
     let mut capturer = Capturer::new(display)?;

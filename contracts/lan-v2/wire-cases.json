@@ -1,0 +1,276 @@
+[
+  {
+    "name": "host registration",
+    "kind": "registration",
+    "valid": true,
+    "body": {
+      "alias": "Area51",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "client-only has no listener",
+    "kind": "registration",
+    "valid": true,
+    "body": {
+      "alias": "Area51",
+      "role": "client",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": null
+    }
+  },
+  {
+    "name": "actor must not come from body",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": "Area51",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "identity": "mac"
+    }
+  },
+  {
+    "name": "private token is not metadata",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": "Area51",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "token": "synthetic-forbidden"
+    }
+  },
+  {
+    "name": "alias normalization is explicit",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": " Area51 ",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "alias must be portable ASCII",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": "Mác",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "client-only cannot advertise listener",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": "Area51",
+      "role": "client",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "multicast cannot be host",
+    "kind": "registration",
+    "valid": false,
+    "body": {
+      "alias": "Area51",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "224.0.0.1",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "IPv6 host",
+    "kind": "registration",
+    "valid": true,
+    "body": {
+      "alias": "Area51",
+      "role": "both",
+      "publicKeyFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "endpoint": {
+        "address": "fd00::2",
+        "port": 42830
+      }
+    }
+  },
+  {
+    "name": "lease creation",
+    "kind": "leaseCreate",
+    "valid": true,
+    "body": {
+      "requestId": "8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa",
+      "expectedGeneration": 0
+    }
+  },
+  {
+    "name": "lease generation must be integer",
+    "kind": "leaseCreate",
+    "valid": false,
+    "body": {
+      "requestId": "8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa",
+      "expectedGeneration": 0.5
+    }
+  },
+  {
+    "name": "lease counter must leave increment room",
+    "kind": "leaseCreate",
+    "valid": false,
+    "body": {
+      "requestId": "8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa",
+      "expectedGeneration": 9007199254740991
+    }
+  },
+  {
+    "name": "lease request ID required",
+    "kind": "leaseCreate",
+    "valid": false,
+    "body": {
+      "expectedGeneration": 0
+    }
+  },
+  {
+    "name": "ready heartbeat",
+    "kind": "heartbeat",
+    "valid": true,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": null
+    }
+  },
+  {
+    "name": "not ready heartbeat",
+    "kind": "heartbeat",
+    "valid": true,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": null,
+      "listenerReady": false,
+      "capabilityReady": false,
+      "buildId": "bb58ac5c4",
+      "errorCode": "listener_bind_failed"
+    }
+  },
+  {
+    "name": "unbounded diagnostic text rejected",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": "password-is-secret"
+    }
+  },
+  {
+    "name": "ready without endpoint rejected",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": null,
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": null
+    }
+  },
+  {
+    "name": "unknown fields rejected",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": null,
+      "message": "synthetic-forbidden"
+    }
+  },
+  {
+    "name": "sequence must be integer",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1.1,
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": null
+    }
+  },
+  {
+    "name": "build IDs are bounded",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": {
+        "address": "192.168.1.3",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "errorCode": null
+    }
+  }
+]

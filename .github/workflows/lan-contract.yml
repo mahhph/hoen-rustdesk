@@ -1,0 +1,21 @@
+name: LAN wire contract
+on:
+  pull_request:
+    paths:
+      - contracts/lan-v2/**
+      - scripts/test-lan-contract.cjs
+      - src/hoen/lan_contract.rs
+      - .github/workflows/lan-contract.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wire-cases:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - run: node scripts/test-lan-contract.cjs

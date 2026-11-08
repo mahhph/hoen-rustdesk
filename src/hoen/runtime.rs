@@ -19,6 +19,7 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Clone)]
 pub(crate) struct Runtime {
     pub identity: Identity,
     pub mailbox: MailboxWorker,
@@ -28,9 +29,22 @@ pub(crate) struct Runtime {
     pub history: Option<Arc<OnceCell<HistoryWorker>>>,
     hosting: bool,
     registration: Registration,
+    mailbox_url: url::Url,
 }
 
 impl Runtime {
+    pub async fn current_host_address(&self) -> ResultType<Self> {
+        let url = self.mailbox_url.clone();
+        let address = hbb_common::tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            spawn_blocking(move || resolve_local_address(&url)),
+        ).await???;
+        let mut next = self.clone();
+        next.policy.local_address = address;
+        next.registration.endpoint = Endpoint::new(address, self.listen_port)?;
+        Ok(next)
+    }
+
     /// Called by the host only after the configured listener has successfully bound.
     pub async fn register_host(&self) -> ResultType<()> {
         if !self.hosting {
@@ -500,6 +514,7 @@ async fn initialize_loaded(enrollment: &Enrollment, hosting: bool) -> ResultType
         history,
         hosting,
         registration,
+        mailbox_url: url::Url::parse(&enrollment.mailbox_url)?,
     }))
 }
 

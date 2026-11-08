@@ -43,8 +43,7 @@ pub(crate) async fn run() -> ResultType<()> {
     let server = crate::server::new();
     let mut tasks = JoinSet::new();
     let mut check = time::interval(Duration::from_secs(3));
-    let mut address_check = time::interval(Duration::from_secs(15));
-    address_check.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    let mut address_check = super::address_changes::AddressChanges::new().await;
     let mut recovery = JoinSet::new();
     let result = loop {
         hbb_common::tokio::select! {

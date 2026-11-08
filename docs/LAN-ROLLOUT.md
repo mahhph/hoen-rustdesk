@@ -45,3 +45,11 @@ Windows LAN-07 first increment: `scripts/remote-desktop-migration-preflight.ps1`
 Each owner replies via mailbox with story IDs, repository/branch/commit, tests and actual output summary, package hashes, installed/config revision if deployed, blocker/next action and affected shared files. Do not send secrets, private keys, raw credential files or screen/clipboard content. Report implementation, build, install, TCP reachability and authenticated desktop acceptance separately.
 
 Windows live network disruption remains waived. Use injected address changes and isolated loopback/integration environments. Record any untested reboot, locked/signed-out or Mac permission state rather than claiming it from a unit test.
+
+## Windows address notification checkpoint (LAN-04, partial)
+
+Windows now subscribes to unicast-address notifications and coalesces hints for one second before running the existing route/listener reconciliation. The 15-second fallback remains active when notifications are absent or subscription fails. Notification handling neither authorizes nor closes a session. macOS currently retains polling; its notification adapter is separate work.
+
+Validation: 42 local Windows Hoen tests passed, including a real Windows initial-notification callback and cancellation of a pending debounce, notification-unavailable polling, and the existing listener replacement/publication-failure/session-preservation tests. No live network configuration was changed. This does not yet supply the v2 lease/presence integration, migration, or a deployable acceptance package.
+
+Regression surface: `src/hoen/host.rs` changes only the source of reconciliation wakeups; its existing listener/session processing remains unchanged. `src/hoen/mod.rs` exposes the feature-local module. Non-Windows builds retain the same polling interval and missed-tick behavior.

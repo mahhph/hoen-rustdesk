@@ -40,6 +40,8 @@ Checkpoints: trusted unauthenticated TLS probe; authenticated read-only API; bro
 
 ## Evidence and reporting
 
+Windows LAN-07 first increment: `scripts/remote-desktop-migration-preflight.ps1` is read-only. Its default profile paths match Lenovo's existing installation; other deployment layouts must supply the explicit mailbox/profile directories. It reports credential/connection agreement without exporting a token or token hash, distinguishes unreadable protected enrollment from missing enrollment, and checks service metadata. It does not decrypt SYSTEM/app credentials, authorize a migration, or inspect every Windows user. Native/non-packaged profile review and broker validation remain required. Fixture checks pass in PowerShell 5.1 and 7 for redaction, unchanged input, conflicting credentials and invalid/missing profiles. Lenovo's accessible profiles matched; its SYSTEM store remained correctly unreadable to the caller. No migration was performed by this increment.
+
 Each owner replies via mailbox with story IDs, repository/branch/commit, tests and actual output summary, package hashes, installed/config revision if deployed, blocker/next action and affected shared files. Do not send secrets, private keys, raw credential files or screen/clipboard content. Report implementation, build, install, TCP reachability and authenticated desktop acceptance separately.
 
 Windows live network disruption remains waived. Use injected address changes and isolated loopback/integration environments. Record any untested reboot, locked/signed-out or Mac permission state rather than claiming it from a unit test.

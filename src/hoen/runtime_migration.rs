@@ -16,6 +16,16 @@ const SIGNING_KEY: &str = "existing-machine-key";
 const BUNDLE: &str = "mailbox-trust-v1";
 
 fn metadata(enrollment: &Enrollment, revision: u64) -> ResultType<MachineConfig> {
+    if enrollment.display_name.is_empty()
+        || enrollment.display_name.len() > 64
+        || enrollment.display_name.trim() != enrollment.display_name
+        || !enrollment
+            .display_name
+            .bytes()
+            .all(|b| (0x20..=0x7e).contains(&b))
+    {
+        bail!("existing alias requires manual review before migration");
+    }
     let trust = match &enrollment.mailbox_leaf_fingerprint {
         Some(pin) => Trust::LeafPin {
             bundle_ref: BUNDLE.into(),
@@ -211,5 +221,22 @@ mod tests {
         value["mailbox_leaf_fingerprint"] = "b".repeat(64).into();
         let mismatched = Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(prepare(&mismatched, 0).is_err());
+    }
+
+    #[test]
+    fn unsupported_legacy_alias_reports_review_without_changing_enrollment() {
+        let original = original();
+        let mut value: serde_json::Value = serde_json::from_slice(original.expose()).unwrap();
+        for name in ["Mac é".to_owned(), "x".repeat(65)] {
+            value["display_name"] = name.into();
+            let legacy = Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
+            assert!(parse(legacy.expose()).is_ok());
+            let result = prepare(&legacy, 0);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "existing alias requires manual review before migration"
+            );
+            assert!(parse(legacy.expose()).unwrap().machine_config.is_none());
+        }
     }
 }

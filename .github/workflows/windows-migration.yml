@@ -1,0 +1,22 @@
+name: Windows migration inventory
+on:
+  pull_request:
+    paths:
+      - scripts/remote-desktop-migration-preflight.ps1
+      - scripts/test-remote-desktop-migration-preflight.ps1
+      - .github/workflows/windows-migration.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-remote-desktop-migration-preflight.ps1
+      - name: Windows PowerShell
+        shell: powershell
+        run: ./scripts/test-remote-desktop-migration-preflight.ps1

@@ -121,7 +121,8 @@ pub(crate) async fn host(
         hoen_host_key: public_key.0.to_vec().into(),
         ..Default::default()
     });
-    timeout(HANDSHAKE_TIMEOUT, stream.send(&identity)).await??;
+    timeout(HANDSHAKE_TIMEOUT, stream.send(&identity)).await?
+        .map_err(|e| anyhow!("sending host identity: {e}"))?;
     let reply = match receive(stream).await?.union {
         Some(message::Union::PublicKey(key)) => key,
         _ => bail!("missing mailbox key exchange"),

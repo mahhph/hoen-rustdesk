@@ -203,6 +203,11 @@ class MainFlutterWindow: NSWindow {
         channel.setMethodCallHandler({
             (call, result) -> Void in
                 switch call.method {
+                case "hostPermissionStatus":
+                    result([
+                        "screenRecording": CGPreflightScreenCaptureAccess(),
+                        "accessibility": AXIsProcessTrusted()
+                    ])
                 case "setWindowTheme":
                     let arg = call.arguments as! [String: Any]
                     let themeName = arg["themeName"] as? String

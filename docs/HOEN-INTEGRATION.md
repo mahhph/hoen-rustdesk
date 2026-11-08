@@ -1,5 +1,7 @@
 # Hoen mailbox integration
 
+Current design update (2026-11-08): [LAN-only registration and recovery](LAN-ARCHITECTURE.md), [implementation stories](LAN-STORIES.md), and [existing-client migration/ownership](LAN-ROLLOUT.md) govern the next increment. No Tailscale or mesh service. Address-change monitoring is now explicitly requested for recovery, without notification-triggered session invalidation. Earlier network-monitoring statements below are historical where they conflict with this baseline.
+
 Status (2026-11-06): the user accepted Windows development as complete after confirming connections in both directions. Mac development remains active. Historical test limits below remain evidence limits, not claims of tests that were never run.
 
 ## Decision and repositories

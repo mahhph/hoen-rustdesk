@@ -1,0 +1,38 @@
+{
+  "capabilities": {
+    "schemaVersion": 2,
+    "registrationVersions": [1, 2],
+    "presenceVersions": [2],
+    "configVersions": [1],
+    "heartbeatSeconds": 15,
+    "leaseSeconds": 60,
+    "maxRequestBytes": 4096
+  },
+  "configuration": {
+    "schemaVersion": 1,
+    "revision": 1,
+    "identity": "windows-hoenlenovo",
+    "alias": "Lenovo",
+    "role": "both",
+    "mailboxUrl": "https://192.168.1.9:42819",
+    "trust": {
+      "mode": "application_ca",
+      "bundleRef": "mailbox-trust-v1",
+      "bundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "credentialRef": "existing-machine-credential",
+    "signingKeyRef": "existing-machine-key",
+    "listenPort": 42830
+  },
+  "migration": {
+    "schemaVersion": 1,
+    "operationId": "8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa",
+    "identity": "windows-hoenlenovo",
+    "fromRevision": 0,
+    "toRevision": 1,
+    "checkpoint": "prepared",
+    "packageRef": "verified-package",
+    "backupRef": "encrypted-backup",
+    "errorCode": null
+  }
+}

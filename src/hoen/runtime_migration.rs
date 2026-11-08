@@ -179,4 +179,37 @@ mod tests {
         changed["machine_config"]["trust"]["mode"] = "application_ca".into();
         assert!(parse(&serde_json::to_vec(&changed).unwrap()).is_err());
     }
+
+    #[test]
+    fn migration_preserves_existing_ca_mode_and_rejects_changed_trust() {
+        let original = original();
+        let mut value: serde_json::Value = serde_json::from_slice(original.expose()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("mailbox_leaf_fingerprint");
+        let ca_original = Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
+        let prepared = prepare(&ca_original, 0).unwrap();
+        let migrated = parse(prepared.expose()).unwrap();
+        assert!(migrated.mailbox_leaf_fingerprint.is_none());
+        assert!(matches!(
+            migrated.machine_config.as_ref().unwrap().trust,
+            Trust::ApplicationCa { .. }
+        ));
+        let mut changed: serde_json::Value = serde_json::from_slice(prepared.expose()).unwrap();
+        changed["machine_config"]["trust"]["bundleSha256"] = "a".repeat(64).into();
+        assert!(parse(&serde_json::to_vec(&changed).unwrap()).is_err());
+        value["mailbox_ca_pem"] = "not a certificate".into();
+        let invalid = Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(prepare(&invalid, 0).is_err());
+    }
+
+    #[test]
+    fn migration_rejects_a_leaf_that_no_longer_matches_its_existing_pin() {
+        let original = original();
+        let mut value: serde_json::Value = serde_json::from_slice(original.expose()).unwrap();
+        value["mailbox_leaf_fingerprint"] = "b".repeat(64).into();
+        let mismatched = Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(prepare(&mismatched, 0).is_err());
+    }
 }

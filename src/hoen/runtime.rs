@@ -19,6 +19,9 @@ use std::{
     sync::Arc,
 };
 
+#[path = "runtime_migration.rs"]
+pub(crate) mod migration;
+
 #[derive(Clone)]
 pub(crate) struct Runtime {
     pub identity: Identity,
@@ -61,6 +64,8 @@ impl Runtime {
 #[serde(deny_unknown_fields)]
 struct Enrollment {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    machine_config: Option<super::machine_config::MachineConfig>,
     identity: String,
     display_name: String,
     mailbox_url: String,
@@ -160,6 +165,7 @@ fn transform_bootstrap(secret: &[u8], seed: [u8; 32]) -> ResultType<Enrollment> 
     let pin = pin.to_hex();
     let enrollment = Enrollment {
         schema_version: 1,
+        machine_config: None,
         identity: value.config.identity,
         display_name: value.config.display_name,
         mailbox_url: value.client.url.clone(),
@@ -209,6 +215,9 @@ fn parse(secret: &[u8]) -> ResultType<Enrollment> {
         || value.mailbox_ca_pem.is_empty()
     {
         bail!("invalid mailbox endpoint or trust configuration");
+    }
+    if let Some(config) = &value.machine_config {
+        migration::validate_binding(&value, config)?;
     }
     Ok(value)
 }

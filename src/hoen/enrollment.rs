@@ -10,6 +10,14 @@ pub(crate) fn command() -> Option<ResultType<()>> {
     use std::io::Read;
     let mut args = std::env::args().skip(1);
     let command = args.next();
+    #[cfg(windows)]
+    if command.as_deref() == Some("--hoen-machine-config-preflight") {
+        return Some((|| {
+            if args.next().is_some() { bail!("machine configuration preflight takes no arguments"); }
+            println!("{}", super::runtime::migration::preflight_host()?);
+            Ok(())
+        })());
+    }
     #[cfg(target_os = "macos")]
     if command.as_deref() == Some("--hoen-host-permissions") {
         return Some((|| {

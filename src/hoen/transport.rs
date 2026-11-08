@@ -76,20 +76,28 @@ impl Transport {
         host: Identity,
         signing_key: &sign::SecretKey,
     ) -> ResultType<(Self, HoenProof)> {
-        let machine = mailbox.lookup(host.clone()).await
-            .map_err(|error| anyhow!("Mailbox could not find or authorize the selected computer: {error}"))?;
-        if machine.identity != host || !machine.hosting_enabled {
-            bail!("mailbox host is unavailable");
-        }
-        let remote = SocketAddr::new(machine.endpoint.address(), machine.endpoint.port());
-        let socket = if remote.is_ipv4() {
-            TcpSocket::new_v4()?
-        } else {
-            TcpSocket::new_v6()?
+        let mut retried = false;
+        let (socket, machine) = loop {
+            let machine = mailbox.lookup(host.clone()).await
+                .map_err(|error| anyhow!("Mailbox could not find or authorize the selected computer: {error}"))?;
+            if machine.identity != host || !machine.hosting_enabled {
+                bail!("mailbox host is unavailable");
+            }
+            let remote = SocketAddr::new(machine.endpoint.address(), machine.endpoint.port());
+            let socket = if remote.is_ipv4() {
+                TcpSocket::new_v4()?
+            } else {
+                TcpSocket::new_v6()?
+            };
+            let connected = timeout(Duration::from_secs(10), socket.connect(remote)).await
+                .map_err(|_| anyhow!("Could not reach the selected computer: connection timed out"))
+                .and_then(|result| result.map_err(|error| anyhow!("Could not reach the selected computer: {}", tcp_failure(error.kind()))));
+            match connected {
+                Ok(socket) => break (socket, machine),
+                Err(_) if !retried => { retried = true; }
+                Err(error) => return Err(error),
+            }
         };
-        let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await
-            .map_err(|_| anyhow!("Could not reach the selected computer: connection timed out"))?
-            .map_err(|error| anyhow!("Could not reach the selected computer: {}", tcp_failure(error.kind())))?;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
         let policy = network::Policy {
@@ -119,24 +127,33 @@ impl Transport {
         use crate::ipc::Data;
         use hoen_mailbox_auth::mailbox::Endpoint;
 
-        let lookup = match service_request(Data::HoenLookupRequest(LookupRequest {
-            host: host.as_str().to_owned(),
-        }))
-        .await?
-        {
-            Data::HoenLookupResponse(Some(value)) => value,
-            _ => bail!("mailbox service host lookup unavailable"),
+        let mut retried = false;
+        let (socket, lookup) = loop {
+            let lookup = match service_request(Data::HoenLookupRequest(LookupRequest {
+                host: host.as_str().to_owned(),
+            }))
+            .await?
+            {
+                Data::HoenLookupResponse(Some(value)) => value,
+                _ => bail!("mailbox service host lookup unavailable"),
+            };
+            // Only the service's response to this validated request selects the
+            // endpoint; never accept arbitrary peer-supplied routing information.
+            Endpoint::new(lookup.endpoint.ip(), lookup.endpoint.port())?;
+            let remote = lookup.endpoint;
+            let socket = if remote.is_ipv4() {
+                TcpSocket::new_v4()?
+            } else {
+                TcpSocket::new_v6()?
+            };
+            match timeout(Duration::from_secs(10), socket.connect(remote)).await {
+                Ok(Ok(socket)) => break (socket, lookup),
+                _ if !retried => { retried = true; }
+                Ok(Err(error)) => return Err(error.into()),
+                Err(error) => return Err(error.into()),
+            }
         };
-        // Only the service's response to this validated request selects the
-        // endpoint; never accept arbitrary peer-supplied routing information.
-        Endpoint::new(lookup.endpoint.ip(), lookup.endpoint.port())?;
         let remote = lookup.endpoint;
-        let socket = if remote.is_ipv4() {
-            TcpSocket::new_v4()?
-        } else {
-            TcpSocket::new_v6()?
-        };
-        let socket = timeout(Duration::from_secs(10), socket.connect(remote)).await??;
         let local = socket.local_addr()?;
         let peer = socket.peer_addr()?;
         let policy = network::Policy {

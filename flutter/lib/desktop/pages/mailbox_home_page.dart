@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -14,7 +15,7 @@ class MailboxHomePage extends StatefulWidget {
   State<MailboxHomePage> createState() => _MailboxHomePageState();
 }
 
-class _MailboxHomePageState extends State<MailboxHomePage> {
+class _MailboxHomePageState extends State<MailboxHomePage> with WidgetsBindingObserver {
   static const _buildId = String.fromEnvironment('HOEN_BUILD_ID',
       defaultValue: 'development');
   bool _loading = true;
@@ -22,14 +23,38 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
   String? _identity;
   String? _selected;
   List<({String identity, String name})> _machines = [];
+  Timer? _refreshTimer;
+  bool _refreshInFlight = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted && ModalRoute.of(context)?.isCurrent == true &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _refresh();
+      }
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _refresh() async {
+    if (!mounted || _refreshInFlight) return;
+    _refreshInFlight = true;
+    final selected = _selected;
     setState(() {
       _loading = true;
       _status = null;
@@ -86,6 +111,8 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
         _loading = false;
         _identity = identity;
         _machines = results;
+        _selected = results.any((machine) => machine.identity == selected)
+            ? selected : null;
       });
     } catch (_) {
       if (mounted) {
@@ -94,6 +121,8 @@ class _MailboxHomePageState extends State<MailboxHomePage> {
           _status = 'Directory unavailable';
         });
       }
+    } finally {
+      _refreshInFlight = false;
     }
   }
 

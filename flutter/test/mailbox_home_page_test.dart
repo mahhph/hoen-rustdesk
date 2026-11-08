@@ -45,6 +45,37 @@ void main() {
     expect(connected, 'host');
   });
 
+  testWidgets('automatic refresh preserves identity and removes disabled hosts', (tester) async {
+    var enabled = true;
+    var loads = 0;
+    String? connected;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MailboxHomePage(
+      loadDirectory: () async {
+        loads++;
+        final data = jsonDecode(directory);
+        data['machines'][2]['hosting_enabled'] = enabled;
+        return jsonEncode(data);
+      },
+      connect: (id) => connected = id,
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Office').last);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(loads, 2);
+    await tester.tap(find.text('Connect'));
+    expect(connected, 'host');
+    enabled = false;
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Connect')).onPressed, isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('failed refresh clears the selected host', (tester) async {
     var available = true;
     String? connected;

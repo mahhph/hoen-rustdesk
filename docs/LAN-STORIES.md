@@ -1,6 +1,6 @@
 # LAN-only implementation stories
 
-Baseline 2026-11-08. All stories are planned unless explicitly noted; assignment does not imply acceptance or completion. Architecture: [LAN-ARCHITECTURE.md](LAN-ARCHITECTURE.md). Migration/evidence: [LAN-ROLLOUT.md](LAN-ROLLOUT.md). Scope contains no Tailscale or mesh work.
+Baseline 2026-11-08. All stories are planned unless explicitly noted; assignment does not imply acceptance or completion. All Windows development occurs on Lenovo. Mac develops Mac/server work. Area51 receives setup/verification stories only after tested artifacts are complete, and has no development assignment. Architecture: [LAN-ARCHITECTURE.md](LAN-ARCHITECTURE.md). Migration/evidence: [LAN-ROLLOUT.md](LAN-ROLLOUT.md). Scope contains no Tailscale or mesh work.
 
 ## LAN-01 — Freeze shared contracts
 Owner: Lenovo. Dependencies: none. Priority: P0.
@@ -10,7 +10,7 @@ As a platform implementer, I need common schemas so Windows, Mac and mailbox cha
 - Commit versioned fixtures for configuration, capability negotiation, registration/presence, migration journal and allowlisted errors, with bounded field sizes.
 - Preserve current identity/key format and v1 API; define exact duplicate, conflict, expiry and unsupported-version responses.
 - Add cross-language fixture validation and negative cases for unknown fields, wrong actor, stale lease/sequence and credential-bearing diagnostics.
-- Mac and Area51 review fixtures before dependent implementation merges. No parallel modification of shared runtime interfaces without coordinator agreement.
+- Mac reviews server/Mac fixtures; Lenovo reviews Windows fixtures before dependent implementation merges. No parallel modification of shared runtime interfaces without coordinator agreement.
 
 ## LAN-02 — Server registry and presence
 Owner: Mac, mailbox repository. Depends: LAN-01. Priority: P0.
@@ -24,7 +24,7 @@ As a user, I need the list to distinguish available hosts from stale registratio
 - Tests cover persistence/restart, lost responses, out-of-order updates, alias collision, role changes, expiry and mixed v1/v2 clients. Deploy additively with database backup and tested server rollback first.
 
 ## LAN-03 — Machine configuration and local broker
-Owner: Lenovo shared Rust/IPC; Area51 Windows adapter; Mac Mac adapter. Depends: LAN-01. Priority: P0.
+Owner: Lenovo shared Rust/IPC and Windows adapter; Mac Mac adapter. Depends: LAN-01. Priority: P0.
 
 As a user, I want one machine connection setting instead of repairing three applications separately.
 
@@ -35,7 +35,7 @@ As a user, I want one machine connection setting instead of repairing three appl
 - Tests cover caller rejection, partial write, concurrent reload, restart and incompatible schema. Verify both signed-in and unattended service contexts on each OS.
 
 ## LAN-04 — Host address and presence recovery
-Owner: Lenovo shared loop; Area51 Windows notifications; Mac macOS notifications. Depends: LAN-01/02/03. Priority: P0.
+Owner: Lenovo shared loop and Windows notifications; Mac macOS notifications. Depends: LAN-01/02/03. Priority: P0.
 
 As a host, I want a DHCP address change to recover without reinstalling or re-enrolling.
 
@@ -59,7 +59,7 @@ As a viewer, I want to select a familiar machine name and understand a failure.
 - Widget and transport tests cover list changes, identity stability, wrong peer key, directory outage, offline host and compact-window layout.
 
 ## LAN-06 — Stable TLS trust and server renewal
-Owner: Mac server; Lenovo shared verifier; Area51 Windows migration. Depends: LAN-01/03. Priority: P0.
+Owner: Mac server; Lenovo shared verifier and Windows migration. Depends: LAN-01/03. Priority: P0.
 
 As a user, I want routine server certificate renewal to work without editing every client.
 
@@ -70,7 +70,7 @@ As a user, I want routine server certificate renewal to work without editing eve
 - Document/verify root overlap, restore of the prior server certificate, scheduled renewal and expiry alert. No production rotation until compatible clients and rollback are prepared.
 
 ## LAN-07 — In-place migration
-Owner: Area51 Windows installer; Mac Mac installer; Lenovo integration verification. Depends: LAN-01/02/03/06. Priority: P0.
+Owner: Lenovo Windows installer and integration verification; Mac Mac installer. Depends: LAN-01/02/03/06. Priority: P0.
 
 As an existing user, I want Upgrade this machine without losing enrollment or history.
 
@@ -83,7 +83,7 @@ As an existing user, I want Upgrade this machine without losing enrollment or hi
 - Demonstrate migration, interrupted migration and rollback with unchanged token/key equality checks in memory, stable public fingerprint, watcher continuation and a second-machine session. No new identity as fallback.
 
 ## LAN-08 — New-machine installation and approval
-Owner: Area51 setup/Windows; Mac approval backend and Mac setup; Lenovo shared UI. Depends: LAN-01/02/03/06. Priority: P1, after existing-machine recovery.
+Owner: Lenovo Windows setup and shared UI; Mac approval backend and Mac setup. Depends: LAN-01/02/03/06. Priority: P1, after existing-machine recovery.
 
 As a new user, I want install, approve, name, connect.
 
@@ -94,7 +94,7 @@ As a new user, I want install, approve, name, connect.
 - Interrupted setup resumes without a duplicate identity. New machine appears ready only after successful registration, listener/readiness check and a real second-machine authentication test.
 
 ## LAN-09 — One repair command and controlled updates
-Owner: Area51 Windows packaging; Mac Mac packaging; Lenovo diagnostic contract. Depends: LAN-03/06/07. Priority: P1.
+Owner: Lenovo Windows packaging and diagnostic contract; Mac Mac packaging. Depends: LAN-03/06/07. Priority: P1.
 
 As a user, I want Repair to explain and fix configuration without wiping the application.
 
@@ -113,3 +113,13 @@ As an administrator, I need trustworthy results and a way to remove a machine.
 - Test Lenovo-to-Area51 and reverse, Mac-to-Windows and reverse, clipboard, listener restart, sleep/wake and permitted unattended states. Record exact source/package/config revisions.
 - Exercise simulated address changes, server outage, wrong certificate, host revocation, old/new-client coexistence and rollback in isolation. No live Wi-Fi-disconnect test; explicitly record that acceptance limitation.
 - Ready for user testing requires working artifacts, current registration, actual authenticated session evidence and usable rollback. Source complete, SCM Running and TCP reachable are separate evidence levels.
+
+## LAN-11 — Set up the completed Windows release on Area51
+Owner: Area51, deployment only. Depends: completed Windows LAN-02 through LAN-07 integration and Lenovo canary acceptance. Status: blocked until a tested release is handed off.
+
+As a user, I want the completed Windows release installed on Area51 without using it as a development machine.
+
+- Receive an exact source/package version, verified hashes, setup instructions, prerequisites, acceptance checklist and rollback instructions from Lenovo; no source coding or build task is assigned.
+- Confirm idle sessions, preserve existing encrypted identity/configuration/history and install the supplied verified package using the completed installer.
+- Verify current IP/registration, same public identity/key, client/server roles, watcher continuity and authenticated desktop sessions in both Windows directions with Lenovo.
+- Report installed version and actual results; return defects to Lenovo for fixes. Do not modify source or improvise trust changes. If setup fails, use the supplied rollback procedure and report the resulting state.

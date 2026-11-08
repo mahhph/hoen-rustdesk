@@ -43,4 +43,3 @@ Checkpoints: trusted unauthenticated TLS probe; authenticated read-only API; bro
 Each owner replies via mailbox with story IDs, repository/branch/commit, tests and actual output summary, package hashes, installed/config revision if deployed, blocker/next action and affected shared files. Do not send secrets, private keys, raw credential files or screen/clipboard content. Report implementation, build, install, TCP reachability and authenticated desktop acceptance separately.
 
 Windows live network disruption remains waived. Use injected address changes and isolated loopback/integration environments. Record any untested reboot, locked/signed-out or Mac permission state rather than claiming it from a unit test.
-

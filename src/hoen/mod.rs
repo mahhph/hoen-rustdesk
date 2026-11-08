@@ -7,6 +7,7 @@ pub(crate) mod handshake;
 pub(crate) mod history_worker;
 pub(crate) mod host;
 pub(crate) mod lan_contract;
+pub(crate) mod machine_config;
 #[cfg(windows)]
 pub(crate) mod local_proof;
 pub(crate) mod mailbox_worker;

@@ -43,3 +43,11 @@ Heartbeat validation must additionally check persisted role/hosting state and cu
 Migration checkpoint values are inventory, backed_up, prepared, validated, activated, verified, committed, rollback_required, rolled_back. Opaque backup references resolve only inside the installer's protected backup root. Invalid/unknown checkpoint or incompatible schema must stop before mutation. Diagnostic output is an allowlisted projection, never serialized raw enrollment.
 
 These metadata fixtures still require platform adapter validators and failure-injection tests in LAN-03/07. LAN-01 is not complete until Mac reviews wire semantics and both implementations consume the fixtures. No certificate changes, API deployment, or identity changes are performed here.
+
+### Shared metadata validation (LAN-03 checkpoint)
+
+`src/hoen/machine_config.rs` consumes the configuration fixture. Schema 1 requires a positive safe-integer revision, the existing mailbox identity grammar, a trimmed printable ASCII alias (1–64 bytes), and a root HTTPS mailbox URL (at most 512 bytes, no credentials/query/fragment). `listenPort` is nonzero. Role is `client`, `host`, or `both`.
+
+Opaque references are 1–64 ASCII letters/digits/hyphens/underscores and cannot contain a filesystem path. Trust is exactly one tagged union: `{mode:"leaf_pin",bundleRef,leafSha256}` or `{mode:"application_ca",bundleRef,bundleSha256}`. Digests are 64 lowercase hexadecimal characters. Unknown fields, including embedded credentials or fields from the other trust mode, are rejected. Parsing is bounded to 4096 bytes and returns only allowlisted error codes, never input text.
+
+This validator does not resolve references, prove ownership, verify certificates, authorize a revision, or activate configuration. Those operations belong to the protected broker and migration adapters; a syntactically valid configuration is not safe to install by itself. Existing runtime enrollment and live trust remain unchanged.

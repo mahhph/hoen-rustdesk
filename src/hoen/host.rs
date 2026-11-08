@@ -116,6 +116,46 @@ mod address_tests {
     use hbb_common::tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
     #[hbb_common::tokio::test]
+    async fn simulated_route_change_publishes_bound_endpoint_and_client_uses_new_lookup() {
+        use std::sync::Mutex;
+        let old = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let old_address = old.local_addr().unwrap();
+        let registry = Mutex::new(old_address);
+        let mut existing_client = TcpStream::connect(old_address).await.unwrap();
+        let (mut existing_server, _) = old.accept().await.unwrap();
+        let candidate: SocketAddr = format!("127.0.0.2:{}", old_address.port()).parse().unwrap();
+
+        let listener = bind_registered(candidate, || async {
+            // This succeeds only if the candidate was bound before publication.
+            let _probe = TcpStream::connect(candidate).await?;
+            *registry.lock().unwrap() = candidate;
+            Ok(())
+        }).await.unwrap();
+        let fresh_lookup = *registry.lock().unwrap();
+        assert_eq!(fresh_lookup, candidate);
+        let mut client = TcpStream::connect(fresh_lookup).await.unwrap();
+        let _probe = listener.accept().await.unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        client.write_all(b"new").await.unwrap();
+        let mut message = [0; 3];
+        server.read_exact(&mut message).await.unwrap();
+        assert_eq!(&message, b"new");
+        drop(old);
+        existing_client.write_all(b"old").await.unwrap();
+        existing_server.read_exact(&mut message).await.unwrap();
+        assert_eq!(&message, b"old");
+
+        // A bind failure never publishes, and a failed publish leaves the
+        // registry unchanged and releases the unadvertised listener.
+        assert!(bind_registered(candidate, || async { panic!("bind failure must not publish") }).await.is_err());
+        assert_eq!(*registry.lock().unwrap(), candidate);
+        let third: SocketAddr = format!("127.0.0.3:{}", old_address.port()).parse().unwrap();
+        assert!(bind_registered(third, || async { Err(anyhow!("simulated mailbox outage")) }).await.is_err());
+        assert_eq!(*registry.lock().unwrap(), candidate);
+        assert!(TcpListener::bind(third).await.is_ok());
+    }
+
+    #[hbb_common::tokio::test]
     async fn replacement_preserves_established_connection_and_accepts_new_connections() {
         let old = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let mut client = TcpStream::connect(old.local_addr().unwrap()).await.unwrap();

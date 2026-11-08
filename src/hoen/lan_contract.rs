@@ -146,7 +146,10 @@ mod tests {
     fn shared_wire_cases_accept_only_valid_requests() {
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../contracts/lan-v2/wire-cases.json")).unwrap();
         for case in cases.as_array().unwrap() {
-            let bytes = serde_json::to_vec(&case["body"]).unwrap();
+            let bytes = match case["raw"].as_str() {
+                Some(raw) => raw.as_bytes().to_vec(),
+                None => serde_json::to_vec(&case["body"]).unwrap(),
+            };
             let accepted = match case["kind"].as_str().unwrap() {
                 "registration" => parse::<Registration>(&bytes).is_ok(),
                 "leaseCreate" => parse::<LeaseCreate>(&bytes).is_ok(),

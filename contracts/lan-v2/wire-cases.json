@@ -272,5 +272,58 @@
       "buildId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "errorCode": null
     }
+  },
+  {
+    "name": "raw lease integer 1.0",
+    "kind": "leaseCreate",
+    "valid": false,
+    "raw": "{\"requestId\":\"8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa\",\"expectedGeneration\":1.0}"
+  },
+  {
+    "name": "raw lease integer 1e0",
+    "kind": "leaseCreate",
+    "valid": false,
+    "raw": "{\"requestId\":\"8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa\",\"expectedGeneration\":1e0}"
+  },
+  {
+    "name": "raw lease integer -0",
+    "kind": "leaseCreate",
+    "valid": false,
+    "raw": "{\"requestId\":\"8a9e33fd-7a9d-4aa8-a6e4-a63b50b406aa\",\"expectedGeneration\":-0}"
+  },
+  {
+    "name": "raw generation exponent",
+    "kind": "heartbeat",
+    "valid": false,
+    "raw": "{\"generation\":1e0,\"sequence\":1,\"endpoint\":{\"address\":\"192.168.1.3\",\"port\":42830},\"listenerReady\":true,\"capabilityReady\":true,\"buildId\":\"bb58ac5c4\",\"errorCode\":null}"
+  },
+  {
+    "name": "raw sequence exponent",
+    "kind": "heartbeat",
+    "valid": false,
+    "raw": "{\"generation\":1,\"sequence\":1e0,\"endpoint\":{\"address\":\"192.168.1.3\",\"port\":42830},\"listenerReady\":true,\"capabilityReady\":true,\"buildId\":\"bb58ac5c4\",\"errorCode\":null}"
+  },
+  {
+    "name": "raw port decimal",
+    "kind": "heartbeat",
+    "valid": false,
+    "raw": "{\"generation\":1,\"sequence\":1,\"endpoint\":{\"address\":\"192.168.1.3\",\"port\":42830.0},\"listenerReady\":true,\"capabilityReady\":true,\"buildId\":\"bb58ac5c4\",\"errorCode\":null}"
+  },
+  {
+    "name": "scoped IPv6 rejected",
+    "kind": "heartbeat",
+    "valid": false,
+    "body": {
+      "generation": 1,
+      "sequence": 1,
+      "endpoint": {
+        "address": "fe80::1%en0",
+        "port": 42830
+      },
+      "listenerReady": true,
+      "capabilityReady": true,
+      "buildId": "bb58ac5c4",
+      "errorCode": null
+    }
   }
 ]

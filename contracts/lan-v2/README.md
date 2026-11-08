@@ -5,6 +5,7 @@ Review gate: Mac must acknowledge before server API integration. Executable wire
 ## Decisions resolving Mac PR21
 
 - All request JSON is UTF-8, at most 4096 bytes, strict unknown-field rejection. Integers are safe nonnegative JSON integers, maximum 9007199254740991. Response listings are bounded to 256 KiB, consistent with the existing broker. Authenticate separately before parsing/acting; bodies never contain an actor identity.
+- Numeric fields use unsigned decimal integer wire syntax (`0` or a nonzero digit followed by digits). Decimal points, exponent notation, negative zero and negative values are rejected even if a JavaScript parser would round them to an integer. Validate raw input before normalization; raw fixtures preserve this distinction. IP literals cannot contain a zone/scope identifier such as `%en0`.
 - Alias: 1–64 printable ASCII bytes, no leading/trailing spaces. Compare using ASCII lowercase. Existing non-ASCII aliases or normalization collisions require explicit resolution before v2 adoption; preserve v1 records and identities meanwhile. No Unicode normalization library is needed for this release.
 - Role is `client`, `host`, or `both`. Client-only profile has absent/null endpoint. Host/both registration requires a valid IP-literal endpoint and nonzero port; none is ready until its lease reports listener and capabilities ready. Missing and null optional fields normalize identically.
 - First v2 write is explicit adoption. After adoption, v1 registry register/updateAddress writes for that identity return 409 `upgrade_required`; v1 reads remain compatible and use current effective metadata. V1 grants also enforce v2 freshness at issue AND consumption. Unadopted identities keep legacy grant behavior. Rollback to a v1-only process requires an explicit authenticated administrator demotion restoring a verified prior profile; never silently demote on an old client's write.
@@ -14,6 +15,26 @@ Review gate: Mac must acknowledge before server API integration. Executable wire
 - Online requires fresh lease AND listenerReady AND capabilityReady AND hosting role. Fresh but not ready is Needs attention; at `now >= expiresAt` it is Offline. No adopted lease is Offline. Never-adopted is Legacy/Unknown. A directory transport error is local Status unavailable.
 - HTTP errors: malformed/bounds 400 `invalid_request`, unauthenticated 401, revoked/forbidden 403, missing 404, incompatible capability 409 `unsupported_version`, conflicting writes 409 with the enum reason, throttled 429. No free-form diagnostic text is returned to ordinary clients. Grant stale/disabled errors are `host_offline`/`host_disabled`. No success response contains token or private key.
 - Capabilities response: `{schemaVersion:2,registrationVersions:[1,2],presenceVersions:[2],configVersions:[1],heartbeatSeconds:15,leaseSeconds:60,maxRequestBytes:4096}`. A genuine unsupported endpoint (404) permits explicitly displayed legacy mode; TLS/auth/parse errors do not masquerade as unsupported capability.
+
+## HTTP methods and envelopes
+
+All routes require the existing machine authentication. Permission to mutate a profile/lease is limited to the authenticated actor. No registration-administration or general secret-management operation is added by these routes.
+
+| Method and route | Success body / behavior |
+|---|---|
+| GET `/v2/remote-capabilities` | 200, capability object above. |
+| GET `/v2/remote-machines/self/status` | 200 `{identity,generation,adopted}`; unadopted generation is zero. No lease ID or credential in this public status. |
+| PUT `/v2/remote-machines/self` | Registration fixture request; 200 `{machine}`. Explicitly adopts v2 only after profile/alias/key checks pass. |
+| GET `/v2/remote-machines` | 200 `{machines:[machine,...]}`; enrolled identities only, includes disabled/legacy records. Bound response; never silently truncate it. |
+| GET `/v2/remote-machines/{identity}` | 200 `{machine}` including readiness; missing/revoked is 404. This lookup is not a grant. Match the more specific self/status route first. |
+| POST `/v2/remote-machines/self/leases` | LeaseCreate fixture; 201 for new, 200 for exact current retry, same saved flat lease response fields defined above. Client-only/hosting-disabled profile returns 409 `host_disabled`. |
+| PUT `/v2/remote-machines/self/leases/{leaseId}` | Heartbeat fixture; 200 `{generation,sequence,acceptedAt,expiresAt,endpointRevision}`. Exact retry returns byte-equivalent field values from accepted response without extending expiry. |
+
+`machine` is `{identity,alias,role,hostingEnabled,publicKeyFingerprint,endpoint,endpointRevision,presence,lastSeen,expiresAt,listenerReady,capabilityReady,buildId,errorCode}`. Endpoint is object or null; legacy missing readiness/build/times are null rather than invented success. Presence enum is `online`, `offline`, `needs_attention`, `legacy`. Role uses the request enum. Endpoint revision is a safe nonnegative integer; first v2 publication starts at one. Profile changes that disable hosting invalidate admission immediately even if a previous ready lease remains fresh. Host/both role alone does not override the existing hosting-disabled policy.
+
+Errors have exactly `{error:{code}}`. Codes `unauthenticated`, `forbidden`, `not_found`, `rate_limited` accompany their HTTP status; other codes are the shared ErrorCode names. Never return free-form exception strings. A stale expectedGeneration is 409 `lease_superseded`; exhausted generation/sequence counters fail 409 `sequence_conflict` without wrapping. Authenticate, validate request, then check **current requestId retry before CAS**. If the current requestId matches but the canonical request differs, reject conflict. Only a new request then checks expectedGeneration and increments the fence. Failed attempts do not mutate the saved response, lease or expiry.
+
+Heartbeat validation must additionally check persisted role/hosting state and current actor/lease in the server transaction; a schema-valid ready heartbeat from a client-only or disabled identity is rejected `host_disabled`. The Rust helper is only wire/sequence validation and cannot establish those authorization facts. Both issue and consume grant transactions recheck actor enrollment, host role/hosting state, current key and unexpired v2 readiness. The heartbeat API never replaces the cryptographic session proof.
 
 ## Configuration and migration fixture boundary
 

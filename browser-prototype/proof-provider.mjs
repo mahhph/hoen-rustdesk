@@ -43,19 +43,25 @@ export function createProofProvider(config, request=mailboxRequest) {
   const pair=nacl.sign.keyPair.fromSeed(seed);
   const viewerFingerprint=createHash('sha256').update(pair.publicKey).digest('hex');
   seed.fill(0);
-  async function registered() {
+  async function machines() {
     const result=await request(config,'/v1/remote-machines');
     if(!Array.isArray(result.machines))throw new Error('Invalid machine directory');
     const viewer=result.machines.find(m=>m.identity===config.viewerIdentity);
-    const host=result.machines.find(m=>m.identity===config.hostIdentity && m.hostingEnabled);
-    if(!viewer || viewer.publicKeyFingerprint!==viewerFingerprint || !host || !/^[0-9a-f]{64}$/.test(host.publicKeyFingerprint || ''))throw new Error('Prototype viewer or host is not registered with the expected key');
+    if(!viewer || viewer.publicKeyFingerprint!==viewerFingerprint)throw new Error('Prototype viewer is not registered with the expected key');
+    return result.machines.filter(m=>m.hostingEnabled && m.identity!==config.viewerIdentity && /^[0-9a-f]{64}$/.test(m.publicKeyFingerprint || ''));
+  }
+  async function registered(identity=config.hostIdentity) {
+    const host=(await machines()).find(m=>m.identity===identity);
+    if(!host)throw new Error('Host is not registered');
     return host;
   }
   return {
-    async info(){const host=await registered();return {host:host.identity,displayName:host.displayName,hostFingerprint:host.publicKeyFingerprint};},
+    async list(){return (await machines()).map(m=>({host:m.identity,displayName:m.displayName}));},
+    async resolve(identity){return (await registered(identity)).endpoint;},
+    async info(identity){const host=await registered(identity);return {host:host.identity,displayName:host.displayName,hostFingerprint:host.publicKeyFingerprint};},
     async issue(host,binding){
-      if(host!==config.hostIdentity || typeof binding!=='string' || !/^[0-9a-f]{64}$/.test(binding))throw new Error('Invalid proof request');
-      await registered();
+      if(typeof host!=='string' || typeof binding!=='string' || !/^[0-9a-f]{64}$/.test(binding))throw new Error('Invalid proof request');
+      await registered(host);
       const grant=await request(config,'/v1/remote-grants','POST',{host,channelBinding:binding});
       const token=canonical32(grant.token);
       try { const proof=createViewerProof(new Uint8Array(Buffer.from(binding,'hex')),new Uint8Array(token),pair.secretKey); return {viewerKey:Buffer.from(proof.viewerKey).toString('base64url'),grantToken:Buffer.from(proof.grantToken).toString('base64url'),signature:Buffer.from(proof.signature).toString('base64url')}; }

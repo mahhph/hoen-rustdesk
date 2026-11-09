@@ -11,7 +11,7 @@ test('issues a proof only for the registered prototype viewer and selected host'
   const calls=[];
   const request=async (_config,route,method,payload)=>{
     calls.push({route,method,payload});
-    if(route==='/v1/remote-machines')return {machines:[{identity:'browser-test',publicKeyFingerprint:viewerFingerprint},{identity:'windows',displayName:'Area51',hostingEnabled:true,publicKeyFingerprint:'b'.repeat(64)}]};
+    if(route==='/v1/remote-machines')return {machines:[{identity:'browser-test',publicKeyFingerprint:viewerFingerprint},{identity:'windows',displayName:'Area51',hostingEnabled:true,publicKeyFingerprint:'b'.repeat(64)},{identity:'mac',displayName:'Mac',hostingEnabled:true,publicKeyFingerprint:'d'.repeat(64),endpoint:{address:'192.168.1.9',port:42830}},{identity:'disabled',hostingEnabled:false,publicKeyFingerprint:'e'.repeat(64)}]};
     return {token:Buffer.alloc(32,3).toString('base64url')};
   };
   const provider=createProofProvider(config,request);
@@ -20,6 +20,12 @@ test('issues a proof only for the registered prototype viewer and selected host'
   assert.equal(Buffer.from(proof.viewerKey,'base64url').toString('hex'),Buffer.from(pair.publicKey).toString('hex'));
   assert.equal(Buffer.from(proof.signature,'base64url').length,64);
   assert.deepEqual(calls.at(-1).payload,{host:'windows',channelBinding:'c'.repeat(64)});
-  await assert.rejects(provider.issue('other','c'.repeat(64)),/Invalid proof request/);
+  assert.deepEqual((await provider.list()).map(m=>m.host),['windows','mac']);
+  assert.equal((await provider.info('mac')).hostFingerprint,'d'.repeat(64));
+  assert.deepEqual(await provider.resolve('mac'),{address:'192.168.1.9',port:42830});
+  await provider.issue('mac','c'.repeat(64));
+  assert.equal(calls.at(-1).payload.host,'mac');
+  await assert.rejects(provider.issue('other','c'.repeat(64)),/Host is not registered/);
+  await assert.rejects(provider.issue('disabled','c'.repeat(64)),/Host is not registered/);
   provider.destroy();
 });

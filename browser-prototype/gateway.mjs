@@ -10,11 +10,14 @@ import { createProofProvider } from './proof-provider.mjs';
 // A fixed destination keeps the initial prototype focused on one configured host.
 export function createGateway({ destinationHost, destinationPort, listenHost = '127.0.0.1', listenPort = 0, provider = null, staticDir = null }) {
   if (!destinationHost || !Number.isInteger(destinationPort) || destinationPort < 1 || destinationPort > 65535) throw new Error('A destination host and port are required');
+  const trustedRequest=req=>{try{const base=new URL('http://'+req.headers.host);return ['localhost','127.0.0.1','[::1]'].includes(base.hostname)&&(!req.headers.origin||req.headers.origin===base.origin);}catch{return false;}};
   const respond=(res,code,value)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
   const httpServer = http.createServer(async (req,res) => {
     try {
-      const pathname=new URL(req.url,'http://localhost').pathname;
-      if(pathname==='/api/config' && req.method==='GET') return provider?respond(res,200,await provider.info()):respond(res,503,{error:'Viewer is not configured'});
+      if(!trustedRequest(req))return respond(res,403,{error:'Untrusted browser origin'});
+      const url=new URL(req.url,'http://localhost'),pathname=url.pathname;
+      if(pathname==='/api/machines' && req.method==='GET')return provider?respond(res,200,{machines:await provider.list()}):respond(res,503,{error:'Viewer is not configured'});
+      if(pathname==='/api/config' && req.method==='GET') return provider?respond(res,200,await provider.info(url.searchParams.get('host')||undefined)):respond(res,503,{error:'Viewer is not configured'});
       if(pathname==='/api/proof' && req.method==='POST') {
         if(!provider)return respond(res,503,{error:'Viewer is not configured'});
         let body='';for await(const chunk of req){body+=chunk;if(body.length>4096)throw new Error('Request too large');}
@@ -27,9 +30,12 @@ export function createGateway({ destinationHost, destinationPort, listenHost = '
       readFile(file,(error,data)=>{if(error)return respond(res,404,{error:'Not found'});const ext=path.extname(file);const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.wasm':'application/wasm'};res.writeHead(200,{'Content-Type':types[ext]||'application/octet-stream'});res.end(data);});
     } catch { if(!res.headersSent)respond(res,400,{error:'Request could not be completed'});else res.destroy(); }
   });
-  const wss = new WebSocketServer({ server: httpServer, path: '/desktop', maxPayload: MAX_FRAME });
-  wss.on('connection', ws => {
-    const socket = net.createConnection({ host: destinationHost, port: destinationPort });
+  const wss = new WebSocketServer({ server: httpServer, path: '/desktop', maxPayload: MAX_FRAME, verifyClient:info=>trustedRequest(info.req) });
+  wss.on('connection', async (ws,req) => {
+    let endpoint={address:destinationHost,port:destinationPort};
+    try{const identity=new URL(req.url,'http://localhost').searchParams.get('host');if(identity){if(!provider)throw Error('No directory');endpoint=await provider.resolve(identity);}if(!net.isIP(endpoint.address)||!Number.isInteger(endpoint.port)||endpoint.port<1||endpoint.port>65535)throw Error('Invalid endpoint');}catch{ws.close(1008,'Host unavailable');return;}
+    if(ws.readyState!==WebSocket.OPEN)return;
+    const socket = net.createConnection({ host: endpoint.address, port: endpoint.port });
     const decoder = new FrameDecoder();
     let closed = false;
     const close = () => { if (closed) return; closed = true; socket.destroy(); if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(); };

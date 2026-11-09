@@ -50,7 +50,7 @@ function injectStyle(): void {
   styleInjected = true;
   const css = `
 .rdweb-root{position:relative;overflow:hidden;outline:none;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
-.rdweb-root[data-scale=original][data-input=mouse]{overflow:auto}
+.rdweb-root[data-scale=original][data-input=mouse]{overflow:auto}.rdweb-root[data-scale=original][data-input=mouse][data-scroll=auto]{overflow:hidden}
 .rdweb-surface{position:absolute;left:0;top:0;transform-origin:0 0}
 .rdweb-canvas{display:block;width:100%;height:100%;image-rendering:auto}
 .rdweb-cursor{position:absolute;left:0;top:0;pointer-events:none;background-repeat:no-repeat;background-size:100% 100%;will-change:transform;display:none;z-index:2}
@@ -133,7 +133,7 @@ export class Viewer {
     this.trackpadSpeed = opts.trackpadSpeed ?? 1.4;
 
     this.root = document.createElement("div");
-    this.root.className = "rdweb-root";
+    this.root.className = "rdweb-root"; this.root.dataset["scroll"] = "auto";
     this.root.tabIndex = 0;
     this.root.style.width = "100%";
     this.root.style.height = "100%";
@@ -591,6 +591,11 @@ export class Viewer {
     } catch {
       /* ignore */
     }
+    if (this.scaleMode === "original" && this.inputMode === "mouse" && this.root.dataset["scroll"] === "auto") {
+      const bounds = this.root.getBoundingClientRect();
+      this.root.scrollLeft = Math.max(0, this.root.scrollWidth - this.root.clientWidth) * Math.min(1, Math.max(0, (e.clientX - bounds.left) / (bounds.width || 1)));
+      this.root.scrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight) * Math.min(1, Math.max(0, (e.clientY - bounds.top) / (bounds.height || 1)));
+    }
     const p = this.toRemote(e.clientX, e.clientY);
     this.curX = p.x;
     this.curY = p.y;
@@ -604,6 +609,11 @@ export class Viewer {
       e.preventDefault();
       this.onTouchMove(e);
       return;
+    }
+    if (this.scaleMode === "original" && this.inputMode === "mouse" && this.root.dataset["scroll"] === "auto") {
+      const bounds = this.root.getBoundingClientRect();
+      this.root.scrollLeft = Math.max(0, this.root.scrollWidth - this.root.clientWidth) * Math.min(1, Math.max(0, (e.clientX - bounds.left) / (bounds.width || 1)));
+      this.root.scrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight) * Math.min(1, Math.max(0, (e.clientY - bounds.top) / (bounds.height || 1)));
     }
     const p = this.toRemote(e.clientX, e.clientY);
     this.session.mouseMove(p.x, p.y);
@@ -622,6 +632,11 @@ export class Viewer {
     const button = BUTTONS[e.button];
     if (!button || !this.heldButtons.has(button)) return;
     e.preventDefault();
+    if (this.scaleMode === "original" && this.inputMode === "mouse" && this.root.dataset["scroll"] === "auto") {
+      const bounds = this.root.getBoundingClientRect();
+      this.root.scrollLeft = Math.max(0, this.root.scrollWidth - this.root.clientWidth) * Math.min(1, Math.max(0, (e.clientX - bounds.left) / (bounds.width || 1)));
+      this.root.scrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight) * Math.min(1, Math.max(0, (e.clientY - bounds.top) / (bounds.height || 1)));
+    }
     const p = this.toRemote(e.clientX, e.clientY);
     this.session.mouseButton(button, false, p.x, p.y);
     this.heldButtons.delete(button);
@@ -675,7 +690,12 @@ export class Viewer {
     if (this.touches.size === 1) {
       this.gesture = "none";
       if (this.inputMode === "touch") {
-        const p = this.toRemote(e.clientX, e.clientY);
+        if (this.scaleMode === "original" && this.inputMode === "mouse" && this.root.dataset["scroll"] === "auto") {
+      const bounds = this.root.getBoundingClientRect();
+      this.root.scrollLeft = Math.max(0, this.root.scrollWidth - this.root.clientWidth) * Math.min(1, Math.max(0, (e.clientX - bounds.left) / (bounds.width || 1)));
+      this.root.scrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight) * Math.min(1, Math.max(0, (e.clientY - bounds.top) / (bounds.height || 1)));
+    }
+    const p = this.toRemote(e.clientX, e.clientY);
         this.setCursor(p.x, p.y);
         this.session.mouseMove(p.x, p.y);
       }
@@ -731,7 +751,12 @@ export class Viewer {
         this.session.mouseMove(x, y);
         this.followCursor();
       } else {
-        const p = this.toRemote(e.clientX, e.clientY);
+        if (this.scaleMode === "original" && this.inputMode === "mouse" && this.root.dataset["scroll"] === "auto") {
+      const bounds = this.root.getBoundingClientRect();
+      this.root.scrollLeft = Math.max(0, this.root.scrollWidth - this.root.clientWidth) * Math.min(1, Math.max(0, (e.clientX - bounds.left) / (bounds.width || 1)));
+      this.root.scrollTop = Math.max(0, this.root.scrollHeight - this.root.clientHeight) * Math.min(1, Math.max(0, (e.clientY - bounds.top) / (bounds.height || 1)));
+    }
+    const p = this.toRemote(e.clientX, e.clientY);
         if (this.gesture === "none") {
           this.gesture = "drag";
           const s = this.toRemote(t.startX, t.startY);
@@ -1054,3 +1079,4 @@ export function normalizeWheel(e: WheelEvent): { dx: number; dy: number; smooth:
   }
   return { dx: e.deltaX, dy: e.deltaY, smooth: true };
 }
+

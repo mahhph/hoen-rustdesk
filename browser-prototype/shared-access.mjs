@@ -33,8 +33,8 @@ const server=https.createServer({key:readFileSync(config.keyFile),cert:readFileS
  }catch{if(!res.headersSent)deny(res,400,'Request failed');else res.destroy();}
 });
 server.on('upgrade',(req,socket,head)=>{
- if(!validOrigin(req)||req.headers.origin!==origin||!authorized(req)||req.url!=='/desktop'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
- const upstream=http.request({hostname:'127.0.0.1',port:42840,path:'/desktop',headers:headers(req)});
+ if(!validOrigin(req)||req.headers.origin!==origin||!authorized(req)||new URL(req.url,origin).pathname!=='/desktop'){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
+ const upstream=http.request({hostname:'127.0.0.1',port:42840,path:req.url,headers:headers(req)});
  upstream.on('upgrade',(res,remote,remoteHead)=>{socket.write('HTTP/1.1 101 Switching Protocols\r\n'+Object.entries(res.headers).map(([k,v])=>`${k}: ${v}`).join('\r\n')+'\r\n\r\n');if(head.length)remote.write(head);if(remoteHead.length)socket.write(remoteHead);socket.pipe(remote).pipe(socket);socket.on('error',()=>remote.destroy());remote.on('error',()=>socket.destroy());socket.on('close',()=>remote.destroy());remote.on('close',()=>socket.destroy());});
  upstream.on('response',()=>socket.destroy());upstream.on('error',()=>socket.destroy());upstream.end();
 });

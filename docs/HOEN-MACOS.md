@@ -87,8 +87,11 @@ The code and synthetic tests do not establish production readiness. A stable sig
 
 ## Separate development host (logged-in user)
 
-In Hoen mailbox mode the Mac client must not start an in-process host when host
-IPC is absent. A separate, supervised `HoenRemoteDev --server` process owns the
+After the Hoen user launch agent is installed, the Mac client must not start an
+in-process host when host IPC is absent. Until then, upgrades preserve the old
+combined startup so they do not silently remove an existing listener. An
+unreadable agent path is treated as installed. A separate, supervised
+`HoenRemoteDev --server` process owns the
 existing user Keychain enrollment, host IPC and listener. The two processes use
 the same signed app executable and identity, but the host does not share the
 client window's lifetime. The supervisor is a per-user Aqua LaunchAgent with

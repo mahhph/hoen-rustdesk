@@ -55,8 +55,9 @@ async function start() {
 }
 connect.addEventListener('click',()=>void start());
 disconnect.addEventListener('click',()=>{session?.close();session=null;disconnect.disabled=true;keyboard.disabled=true;viewer?.destroy();viewer=null;connect.disabled=false;status.textContent='Disconnected';});
-fetch('/api/machines').then(r=>{if(!r.ok)throw new Error();return r.json();}).then(c=>{computer.replaceChildren(...c.machines.map((m:{host:string;displayName:string})=>new Option(m.displayName,m.host)));status.textContent='Choose a computer and connect';connect.disabled=!c.machines.length;computer.disabled=false;}).catch(()=>{status.textContent='Could not load registered computers.';});
+fetch('/api/machines').then(r=>{if(!r.ok)throw new Error();return r.json();}).then(c=>{computer.replaceChildren(...c.machines.map((m:{host:string;displayName:string})=>new Option(m.displayName,m.host)));status.textContent='';connect.disabled=!c.machines.length;computer.disabled=false;}).catch(()=>{status.textContent='Could not load registered computers.';});
 
 keyboard.addEventListener('click',()=>viewer?.showKeyboard());
+
 
 

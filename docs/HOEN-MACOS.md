@@ -84,3 +84,22 @@ The following commands are development setup operations for the signed applicati
 - `--hoen-import-host` reads the validated enrollment bundle only from standard input and saves it to the user's Keychain.
 
 The code and synthetic tests do not establish production readiness. A stable signing identity, a real Windows-to-Mac session, capture and input permission checks, reboot transitions, and complete interactive session tests remain necessary. The macOS network observer and Keychain behavior must also be verified in any installed launch-agent context. A login-time address change only works when the mailbox service itself remains reachable and its TLS identity still validates.
+
+## Separate development host (logged-in user)
+
+In Hoen mailbox mode the Mac client must not start an in-process host when host
+IPC is absent. A separate, supervised `HoenRemoteDev --server` process owns the
+existing user Keychain enrollment, host IPC and listener. The two processes use
+the same signed app executable and identity, but the host does not share the
+client window's lifetime. The supervisor is a per-user Aqua LaunchAgent with
+`RunAtLoad`, `KeepAlive` and a 15-second launch throttle. It is not a pre-login
+service. The host's stop-hosting setting still controls the listener.
+
+For the November 8 development trial the LaunchAgent at
+`~/Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist` points to the
+installed development app and uses the `--server` argument. Closing the client
+left the host listening; terminating the host caused launchd to restart it and
+its listener sent an initial handshake. An actual logout/login and a complete
+remote session after the supervision change remain separate acceptance tests.
+Removing or disabling the agent must not delete the app, Keychain entries, or
+mailbox state. Do not replace a pre-existing agent without checking ownership.

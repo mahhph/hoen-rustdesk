@@ -242,6 +242,10 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::platform::try_remove_temp_update_files();
             hbb_common::config::PeerConfig::preload_peers();
         }
+        // The Hoen Mac client must never create a host in its own process.
+        // A separately supervised host owns IPC and the desktop listener.
+        #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+        let no_server = true;
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
         #[cfg(any(target_os = "linux", target_os = "macos"))]

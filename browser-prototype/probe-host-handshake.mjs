@@ -7,7 +7,7 @@ const host=process.env.DESKTOP_HOST, pin=process.env.DESKTOP_HOST_FINGERPRINT;
 if(!host || !/^[a-fA-F0-9]{64}$/.test(pin || ''))throw new Error('Supply the reviewed host address and SHA-256 fingerprint.');
 const gateway=createGateway({destinationHost:host,destinationPort:Number(process.env.DESKTOP_HOST_PORT || 42830)});
 const address=await gateway.listen();
-const ws=new WebSocket(`ws://127.0.0.1:${address.port}`);
+const ws=new WebSocket(`ws://127.0.0.1:${address.port}/desktop`);
 try {
   const opened=once(ws,'open');
   const queue=[]; let waiter;

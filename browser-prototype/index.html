@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remote Desktop Prototype</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;color:#eef2ff;background:#101827}body{margin:0}header{display:flex;align-items:center;gap:1rem;padding:1rem 1.4rem;background:#1b263a}h1{font-size:1.1rem;margin:0}button{border:0;border-radius:.4rem;padding:.6rem 1rem;font:inherit;cursor:pointer;background:#2866e6;color:white}button:disabled{opacity:.45;cursor:default}#status{color:#b7c4d8;font-size:.9rem}#viewer{height:calc(100vh - 4.5rem);background:#080d15;display:flex;align-items:center;justify-content:center}#viewer:empty::before{content:'Your desktop will appear here after you connect.';color:#8c9bb2}
+  body{height:100dvh;display:flex;flex-direction:column}header{flex-wrap:wrap;gap:.5rem;padding:.7rem}#viewer{flex:1;min-height:0;height:auto}#status{flex-basis:100%}button{min-height:44px}@media(max-width:480px){h1{width:100%;font-size:1rem}} </style>
+</head>
+<body>
+  <header><h1>Remote Desktop</h1><button id="connect" disabled>Connect</button><button id="disconnect" disabled>Disconnect</button><button id="keyboard" disabled>Keyboard</button><span id="status" role="status">Checking connection…</span></header>
+  <main id="viewer" aria-label="Remote desktop"></main>
+  <script type="module" src="/web/main.ts"></script>
+</body>
+</html>
+

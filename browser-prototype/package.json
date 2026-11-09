@@ -2,7 +2,8 @@
   "name": "remote-desktop-browser-prototype",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test", "gateway": "node gateway.mjs" },
-  "dependencies": { "@noble/hashes": "1.8.0", "tweetnacl": "1.0.3", "ws": "8.22.2" },
+  "scripts": { "test": "node --test", "build": "vite build", "gateway": "node gateway.mjs" },
+  "dependencies": { "@bufbuild/protobuf": "2.16.0", "@noble/hashes": "1.8.0", "fzstd": "0.1.1", "opus-decoder": "0.7.12", "tweetnacl": "1.0.3", "ws": "8.22.2" },
+  "devDependencies": { "vite": "8.3.7" },
   "engines": { "node": ">=20" }
 }

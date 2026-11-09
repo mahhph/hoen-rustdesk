@@ -24,7 +24,7 @@ test('translates real WebSocket messages to and from native TCP frames', async t
   const gateway = createGateway({ destinationHost: '127.0.0.1', destinationPort: server.address().port });
   const address = await gateway.listen();
   t.after(async () => { await gateway.close(); await new Promise(resolve => server.close(resolve)); });
-  const ws = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${address.port}/desktop`);
   await once(ws, 'open');
   const reply = once(ws, 'message');
   ws.send(Buffer.from('actual-frame'));
@@ -34,4 +34,14 @@ test('translates real WebSocket messages to and from native TCP frames', async t
   assert.deepEqual(received, ['actual-frame']);
   ws.close();
   await once(ws, 'close');
+});
+
+test('browser configuration and proof endpoints use the configured provider', async t => {
+  const gateway=createGateway({destinationHost:'127.0.0.1',destinationPort:12345,provider:{info:async()=>({host:'windows',hostFingerprint:'a'.repeat(64)}),issue:async(host,binding)=>({host,binding})}});
+  const address=await gateway.listen();
+  t.after(()=>gateway.close());
+  const base=`http://127.0.0.1:${address.port}`;
+  assert.equal((await (await fetch(`${base}/api/config`)).json()).host,'windows');
+  const response=await fetch(`${base}/api/proof`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:'windows',binding:'b'.repeat(64)})});
+  assert.equal((await response.json()).binding,'b'.repeat(64));
 });

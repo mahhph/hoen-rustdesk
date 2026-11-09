@@ -1,0 +1,28 @@
+rdweb
+Copyright (c) 2026 bropines and contributors
+Licensed under the MIT License (see LICENSE).
+
+RustDesk is a trademark of its respective owners (Purslane Ltd.). rdweb is an
+independent browser client that speaks the RustDesk network protocol so it can
+connect to RustDesk peers through RustDesk-compatible servers; it is not
+affiliated with or endorsed by RustDesk / Purslane Ltd.
+
+proto/*.proto are written for this project. They declare only the messages
+rdweb uses, with field numbers and types matching the protocol for
+interoperability. No RustDesk source code is included.
+
+src/react/ui/* are adapted from shadcn/ui (MIT, https://ui.shadcn.com).
+dist/react/style.css is generated with Tailwind CSS and includes a scoped
+subset of its preflight (MIT, Tailwind Labs). The React UI was moved here
+from RD Panel (MIT, same authors).
+
+src/react/fonts/nerdSymbols.ts embeds "Symbols Nerd Font" 3.5.1 from
+Nerd Fonts (https://github.com/ryanoasis/nerd-fonts, MIT, Copyright (c) 2014
+Ryan L McIntyre), converted to WOFF2. Its icon sets keep their licenses, among
+them Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0),
+Octicons and Powerline Extra Symbols (MIT), Weather Icons and Pomicons (SIL OFL
+1.1); see the Nerd Fonts README for the full list. src/react/xtermCss.ts is the
+stylesheet of xterm.js (MIT, The xterm.js authors).
+
+Third-party npm packages are distributed under their own licenses; see
+package.json and their LICENSE files.

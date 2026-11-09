@@ -21,8 +21,10 @@ export function displayControls(session:Session,viewer:Viewer){
  apply.onclick=()=>{const [w,h]=resolution.value.split('x').map(Number);if(!Number.isInteger(w)||!Number.isInteger(h))return;session.changeResolution(w,h);notice.textContent='Requested resolution change on the host monitor…';apply.disabled=true;clearTimeout(timeout);timeout=setTimeout(()=>{notice.textContent='No display update received. The host may not support this resolution.';apply.disabled=resolution.value==='current';},10000);};
  scale.onchange=()=>{viewer.setScaleMode(scale.value==='original'?'original':'fit');viewer.focus();};
  fullscreen.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{notice.textContent='Fullscreen is unavailable in this browser. Try landscape orientation.';}};
- scale.value='fit';notice.textContent='Resolution changes affect the host monitor. Pinch to zoom on touchscreens.';
- const offConnected=session.on('connected',refresh);
+ scale.value='original';viewer.setScaleMode('original');notice.textContent='Resolution changes affect the host monitor. Pinch to zoom on touchscreens.';
+ const offConnected=session.on('connected',()=>{viewer.setScaleMode('original');refresh();});
  const offDisplay=session.on('display',()=>{clearTimeout(timeout);refresh();notice.textContent='Display updated.';});
  const offClose=session.on('close',()=>{clearTimeout(timeout);panel.hidden=true;offConnected();offDisplay();offClose();});
 }
+
+

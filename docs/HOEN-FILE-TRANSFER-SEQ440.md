@@ -1,0 +1,12 @@
+# Authenticated file-transfer host patch (seq440)
+
+Base: `df82032dba8e8c56886baaaf758356ca5b828299` (`codex/browser-desktop-prototype`).
+Shared implementation owner: Mac mailbox worker; Windows worker owns Windows build/install and browser roundtrip.
+
+The Hoen login path accepts desktop or FileTransfer only. FileTransfer requires the same effective `OPTION_ENABLE_FILE_TRANSFER` permission as the legacy file login. The existing verified channel, fresh grant consumption, proof verification, host-disable checks, credential clearing and login-scope digest remain in place. File state is set only after proof authentication, before the authorization response establishes `AuthConnType::FileTransfer`, so existing file-message scope and one-way file policy handlers apply. Repeated authenticated logins must retain the exact identity/directory/hidden-file scope and permitted session kind. Camera, terminal and port forwarding stay rejected. No password fallback was introduced.
+
+Regression surface: `src/hoen/authorization.rs` adds the Hoen-only kind/permission predicate and one test. `src/server/connection.rs` changes only Hoen initial/repeated login handling and sets the existing file-session state. Legacy login, proof/grant internals, file operations and browser protocol are unchanged.
+
+Validation: `git diff --check` passed. One isolated test extracted verbatim from the policy/helper and compiled against the actual generated protobuf types passed (desktop; file allowed/denied; camera/terminal/tunnel rejected). This does not prove the full host builds or authenticate a real session. Native command `cargo +stable test --offline --locked --lib --features hoen-mailbox mailbox_login_allows_desktop_and_permitted_files_only` exited 101 before root compilation: magnum-opus cannot find `/opt/homebrew/Cellar/opus`; scrap cannot find `/opt/homebrew/Cellar/libyuv`.
+
+Remaining acceptance work: build/test updated Windows and Mac hosts; install preserving identities and credentials; connect through the authenticated browser FileTransferSession using a fresh grant; upload a disposable small file, download it and compare hashes; test file permission denial and scope-change rejection on a live host. Mac installed application/Keychain paths are outside this worker's writable roots and approval is unavailable. No installed app, identity, Keychain, watcher state or configuration was modified. File transfer is not accepted until the real roundtrip succeeds.

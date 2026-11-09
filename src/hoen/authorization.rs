@@ -1,5 +1,5 @@
 use super::{handshake::VerifiedChannel, mailbox_worker::MailboxWorker};
-use base::message_proto::{HoenProof, LoginRequest};
+use base::message_proto::{login_request, HoenProof, LoginRequest};
 use hbb_common::{anyhow::bail, sodiumoxide::crypto::sign, ResultType};
 use hoen_mailbox_auth::{
     mailbox::{ConsumedGrant, GrantToken, Identity},
@@ -16,9 +16,35 @@ pub(crate) fn reject_legacy_proof(login: &LoginRequest) -> ResultType<()> {
     Ok(())
 }
 
+/// Session kinds supported by the authenticated Hoen transport. File access
+/// still requires the host's existing effective file-transfer permission.
+pub(crate) fn login_scope_allowed(login: &LoginRequest, file_permission: bool) -> bool {
+    match login.union.as_ref() {
+        None => true,
+        Some(login_request::Union::FileTransfer(_)) => file_permission,
+        Some(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mailbox_login_allows_desktop_and_permitted_files_only() {
+        use base::message_proto::{FileTransfer, PortForward, Terminal, ViewCamera};
+        let mut login = LoginRequest::new();
+        assert!(login_scope_allowed(&login, false));
+        login.set_file_transfer(FileTransfer::new());
+        assert!(login_scope_allowed(&login, true));
+        assert!(!login_scope_allowed(&login, false));
+        login.set_view_camera(ViewCamera::new());
+        assert!(!login_scope_allowed(&login, true));
+        login.set_terminal(Terminal::new());
+        assert!(!login_scope_allowed(&login, true));
+        login.set_port_forward(PortForward::new());
+        assert!(!login_scope_allowed(&login, true));
+    }
 
     #[test]
     fn legacy_login_rejects_mailbox_proof_even_with_password() {

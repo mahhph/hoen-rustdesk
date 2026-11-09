@@ -2974,8 +2974,12 @@ impl Connection {
 
     #[cfg(feature = "hoen-mailbox")]
     async fn hoen_login(&mut self, mut lr: LoginRequest) -> bool {
-        // A Hoen connection is remote desktop only; no fallback to legacy approval paths.
-        if crate::hoen::host::disabled() || lr.union.is_some() || !self.check_login_scope(&lr).await { return false; }
+        // No fallback to legacy password or approval paths for either session kind.
+        if crate::hoen::host::disabled()
+            || !crate::hoen::authorization::login_scope_allowed(
+                &lr, Self::permission(keys::OPTION_ENABLE_FILE_TRANSFER, &self.control_permissions),
+            )
+            || !self.check_login_scope(&lr).await { return false; }
         let Some(proof) = lr.hoen_proof.take() else { return false; };
         let Some(context) = self.hoen.clone() else { return false; };
         let verified = hbb_common::tokio::select! {
@@ -2997,6 +3001,10 @@ impl Connection {
         self.require_2fa = None;
         self.trusted_device = None;
         self.handle_login_request_without_validation(&lr).await;
+        self.reset_session_scope_for_login();
+        if let Some(login_request::Union::FileTransfer(ft)) = lr.union.as_ref() {
+            self.file_transfer = Some((ft.dir.clone(), ft.show_hidden));
+        }
         if !self.check_privacy_mode_on().await { return false; }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         self.try_start_cm_ipc();
@@ -3072,7 +3080,10 @@ impl Connection {
             if let Some(message::Union::LoginRequest(lr)) = msg.union.as_ref() {
                 #[cfg(feature = "hoen-mailbox")]
                 if self.hoen.is_some() {
-                    return self.hoen_grant.is_some() && lr.union.is_none()
+                    return self.hoen_grant.is_some()
+                        && crate::hoen::authorization::login_scope_allowed(
+                            lr, Self::permission(keys::OPTION_ENABLE_FILE_TRANSFER, &self.control_permissions),
+                        )
                         && self.login_scope == Some(Self::login_scope_digest(lr));
                 }
                 return true;

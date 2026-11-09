@@ -1,0 +1,8 @@
+{
+  "name": "remote-desktop-browser-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test", "gateway": "node gateway.mjs" },
+  "dependencies": { "ws": "8.22.2" },
+  "engines": { "node": ">=20" }
+}

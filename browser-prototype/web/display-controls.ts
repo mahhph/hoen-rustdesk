@@ -8,12 +8,15 @@ export function displayControls(session:Session,viewer:Viewer){
  const notice=panel.querySelector<HTMLElement>('#display-notice')!;
  const apply=panel.querySelector<HTMLButtonElement>('#apply-resolution')!;
  const fullscreen=panel.querySelector<HTMLButtonElement>('#fullscreen')!;
+ const originals=new Map<number,{width:number;height:number}>();
  let timeout:ReturnType<typeof setTimeout>|undefined;
  const refresh=()=>{
   const peer=session.peer,display=session.display;if(!peer||!display)return;
   monitor.replaceChildren(...peer.displays.filter(d=>d.online).map(d=>new Option(`Monitor ${d.index+1} · ${d.width}×${d.height}`,String(d.index))));monitor.value=String(display.index);
+  if(!originals.has(display.index))originals.set(display.index,{width:display.originalWidth||display.width,height:display.originalHeight||display.height});
+  const original=originals.get(display.index)!;
   const options=peer.resolutions.filter(r=>r.width>0&&r.height>0);
-  resolution.replaceChildren(new Option(`${display.width}×${display.height} (current)`,'current'),...options.filter(r=>r.width!==display.width||r.height!==display.height).map(r=>new Option(`${r.width}×${r.height}`,`${r.width}x${r.height}`)),new Option('Restore original resolution','0x0'));
+  resolution.replaceChildren(new Option(`${display.width}×${display.height} (current)`,'current'),...options.filter(r=>r.width!==display.width||r.height!==display.height).map(r=>new Option(`${r.width}×${r.height}`,`${r.width}x${r.height}`)),new Option('Restore original resolution',`${original.width}x${original.height}`));
   apply.disabled=true;panel.hidden=false;
  };
  monitor.onchange=()=>{notice.textContent='Switching monitor…';session.switchDisplay(Number(monitor.value));};
@@ -26,5 +29,6 @@ export function displayControls(session:Session,viewer:Viewer){
  const offDisplay=session.on('display',()=>{clearTimeout(timeout);refresh();notice.textContent='Display updated.';});
  const offClose=session.on('close',()=>{clearTimeout(timeout);panel.hidden=true;offConnected();offDisplay();offClose();});
 }
+
 
 

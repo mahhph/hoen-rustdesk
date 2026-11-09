@@ -1,4 +1,5 @@
 import { displayControls } from './display-controls';
+import {icon,setupToolbarIcons} from './toolbar-icons';
 
 import type {SessionOptions} from '../vendor/rdweb/src/types';
 import { Session } from '../vendor/rdweb/src/session';
@@ -9,14 +10,16 @@ const computer=document.querySelector<HTMLSelectElement>('#computer')!;
 
 const toolbar=document.querySelector<HTMLElement>('#toolbar')!;
 const toolbarToggle=document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
+setupToolbarIcons();
 function collapseToolbar(collapsed:boolean){
  toolbar.classList.toggle('collapsed',collapsed);
- toolbarToggle.textContent=collapsed?'⌄ Menu':'⌃ Hide';
+ toolbarToggle.innerHTML=icon(collapsed?'show':'hide');
  toolbarToggle.setAttribute('aria-expanded',String(!collapsed));
  toolbarToggle.setAttribute('aria-label',collapsed?'Show toolbar':'Hide toolbar');
  toolbarToggle.title=collapsed?'Show toolbar':'Hide toolbar';
 }
 toolbarToggle.onclick=()=>collapseToolbar(!toolbar.classList.contains('collapsed'));
+collapseToolbar(false);
 const disconnect=document.querySelector<HTMLButtonElement>('#disconnect')!;
 const status=document.querySelector<HTMLElement>('#status')!;
 const area=document.querySelector<HTMLElement>('#viewer')!;

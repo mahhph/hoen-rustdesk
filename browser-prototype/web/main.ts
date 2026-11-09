@@ -1,3 +1,4 @@
+import { displayControls } from './display-controls';
 import { Session } from '../vendor/rdweb/src/session';
 import { Viewer } from '../vendor/rdweb/src/viewer';
 
@@ -26,7 +27,7 @@ async function start() {
       if(!reply.ok)throw new Error('Could not obtain a desktop connection proof.');
       const p=await reply.json();return {viewerKey:decode(p.viewerKey),grantToken:decode(p.grantToken),signature:decode(p.signature)};
     }}});
-    viewer?.destroy(); viewer=new Viewer(area,session);
+    viewer?.destroy(); viewer=new Viewer(area,session); displayControls(session,viewer);
     session.on('state',({state})=>{status.textContent=state==='connected'?'Connected':`Connecting: ${state}`;});
     session.on('connected',()=>{status.textContent='Connected';disconnect.disabled=false;viewer?.focus();keyboard.disabled=false;});
     session.on('close',({reason})=>{status.textContent=`Disconnected: ${reason}`;disconnect.disabled=true;keyboard.disabled=true;viewer?.destroy();viewer=null;connect.disabled=false;});
@@ -38,3 +39,4 @@ disconnect.addEventListener('click',()=>{session?.close();session=null;disconnec
 fetch('/api/config').then(r=>{if(!r.ok)throw new Error();return r.json();}).then(c=>{status.textContent=`Ready to connect to ${c.host}`;connect.disabled=false;}).catch(()=>{status.textContent='Prototype viewer is not configured yet.';});
 
 keyboard.addEventListener('click',()=>viewer?.showKeyboard());
+

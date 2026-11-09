@@ -28,4 +28,11 @@ test('issues a proof only for the registered prototype viewer and selected host'
   await assert.rejects(provider.issue('other','c'.repeat(64)),/Host is not registered/);
   await assert.rejects(provider.issue('disabled','c'.repeat(64)),/Host is not registered/);
   provider.destroy();
+  const routed=createProofProvider({...config,transportOverrides:{mac:{address:'127.0.0.1',port:42833}}},request);
+  assert.deepEqual(await routed.resolve('mac'),{address:'127.0.0.1',port:42833});
+  assert.equal((await routed.info('mac')).hostFingerprint,'d'.repeat(64));
+  await assert.rejects(routed.resolve('other'),/Host is not registered/);
+  await routed.issue('mac','c'.repeat(64));assert.equal(calls.at(-1).payload.host,'mac');
+  routed.destroy();
+  assert.throws(()=>createProofProvider({...config,transportOverrides:{mac:{address:'evil.invalid',port:42833}}},request),/Invalid transport override/);
 });

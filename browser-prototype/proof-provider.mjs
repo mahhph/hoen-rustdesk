@@ -1,5 +1,6 @@
 import https from 'node:https';
 import tls from 'node:tls';
+import {isIP} from 'node:net';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import nacl from 'tweetnacl';
 import { createViewerProof } from './authentication.mjs';
@@ -35,6 +36,11 @@ function mailboxRequest(config, route, method='GET', payload) {
 }
 
 export function createProofProvider(config, request=mailboxRequest) {
+  const overrides=config.transportOverrides??{};
+  if(typeof overrides!=='object'||overrides===null||Array.isArray(overrides))throw new Error('Invalid transport overrides');
+  for(const [identity,endpoint] of Object.entries(overrides)){
+    if(!/^[a-z][a-z0-9-]{0,63}$/.test(identity)||!endpoint||typeof endpoint.address!=='string'||!isIP(endpoint.address)||!Number.isInteger(endpoint.port)||endpoint.port<1||endpoint.port>65535)throw new Error('Invalid transport override');
+  }
   for(const name of ['viewerIdentity','hostIdentity']) if(!/^[a-z][a-z0-9-]{0,63}$/.test(config[name] || ''))throw new Error('Invalid viewer or host identity');
   if(typeof config.mailboxCaPem!=='string'||!config.mailboxCaPem.includes('BEGIN CERTIFICATE'))throw new Error('Mailbox certificate is required');
   if(!/^[0-9a-f]{64}$/i.test(config.mailboxFingerprint || ''))throw new Error('Mailbox fingerprint is required');
@@ -57,7 +63,7 @@ export function createProofProvider(config, request=mailboxRequest) {
   }
   return {
     async list(){return (await machines()).map(m=>({host:m.identity,displayName:m.displayName}));},
-    async resolve(identity){return (await registered(identity)).endpoint;},
+    async resolve(identity){const host=await registered(identity);return overrides[host.identity]??host.endpoint;},
     async info(identity){const host=await registered(identity);return {host:host.identity,displayName:host.displayName,hostFingerprint:host.publicKeyFingerprint};},
     async issue(host,binding){
       if(typeof host!=='string' || typeof binding!=='string' || !/^[0-9a-f]{64}$/.test(binding))throw new Error('Invalid proof request');

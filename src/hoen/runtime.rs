@@ -19,6 +19,9 @@ use std::{
     sync::Arc,
 };
 
+#[path = "runtime_migration.rs"]
+pub(crate) mod migration;
+
 #[derive(Clone)]
 pub(crate) struct Runtime {
     pub identity: Identity,
@@ -61,6 +64,8 @@ impl Runtime {
 #[serde(deny_unknown_fields)]
 struct Enrollment {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    machine_config: Option<super::machine_config::MachineConfig>,
     identity: String,
     display_name: String,
     mailbox_url: String,
@@ -160,6 +165,7 @@ fn transform_bootstrap(secret: &[u8], seed: [u8; 32]) -> ResultType<Enrollment> 
     let pin = pin.to_hex();
     let enrollment = Enrollment {
         schema_version: 1,
+        machine_config: None,
         identity: value.config.identity,
         display_name: value.config.display_name,
         mailbox_url: value.client.url.clone(),
@@ -209,6 +215,9 @@ fn parse(secret: &[u8]) -> ResultType<Enrollment> {
         || value.mailbox_ca_pem.is_empty()
     {
         bail!("invalid mailbox endpoint or trust configuration");
+    }
+    if let Some(config) = &value.machine_config {
+        migration::validate_binding(&value, config)?;
     }
     Ok(value)
 }
@@ -384,6 +393,9 @@ pub(crate) fn import_enrollment(
 fn host_secret_from_viewer(secret: &super::credentials::Secret) -> ResultType<super::credentials::Secret> {
     let mut enrollment = parse(secret.expose())?;
     enrollment.hosting_enabled = true;
+    if let Some(config) = enrollment.machine_config.as_mut() {
+        config.role = super::lan_contract::Role::Both;
+    }
     super::credentials::Secret::new(serde_json::to_vec(&enrollment)?)
         .map_err(|_| anyhow!("cannot prepare protected host enrollment"))
 }
@@ -616,6 +628,26 @@ mod tests {
         assert_eq!(after.mailbox_leaf_fingerprint, before.mailbox_leaf_fingerprint);
         assert!(after.hosting_enabled);
         assert!(!parse(viewer.expose()).unwrap().hosting_enabled);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn migrated_viewer_can_prepare_a_host_without_changing_viewer() {
+        let mut value = fixture();
+        let certificate = include_str!("../../libs/hbb_common/tests/data/websocket-cert.pem");
+        value["mailbox_ca_pem"] = certificate.into();
+        value["mailbox_leaf_fingerprint"] = bootstrap_certificate_fingerprint(certificate).unwrap().to_hex().into();
+        let viewer = super::super::credentials::Secret::new(serde_json::to_vec(&value).unwrap()).unwrap();
+        let migrated = migration::prepare(&viewer, 0).unwrap();
+        let host = host_secret_from_viewer(&migrated).unwrap();
+        let before = parse(migrated.expose()).unwrap();
+        let after = parse(host.expose()).unwrap();
+        assert!(!before.hosting_enabled && after.hosting_enabled);
+        assert_eq!(before.identity, after.identity);
+        assert_eq!(before.signing_seed, after.signing_seed);
+        assert_eq!(before.access_token, after.access_token);
+        assert_eq!(before.machine_config.as_ref().unwrap().revision, after.machine_config.as_ref().unwrap().revision);
+        assert_eq!(after.machine_config.as_ref().unwrap().role, super::super::lan_contract::Role::Both);
     }
 
     #[test]

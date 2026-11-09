@@ -341,6 +341,10 @@ pub enum SwitchSidesUuidAction {
 #[serde(tag = "t", content = "c")]
 pub enum Data {
     #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenConfigurationStatusRequest,
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
+    HoenConfigurationStatusResponse(Option<String>),
+    #[cfg(all(windows, feature = "hoen-mailbox"))]
     HoenDirectoryRequest,
     #[cfg(all(windows, feature = "hoen-mailbox"))]
     HoenDirectoryResponse(Option<crate::hoen::local_proof::DirectoryResponse>),

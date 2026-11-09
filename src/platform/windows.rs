@@ -864,6 +864,22 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                     if let Ok(Some(data)) = stream.next_timeout(1000).await {
                         match data {
                             #[cfg(feature = "hoen-mailbox")]
+                            ipc::Data::HoenConfigurationStatusRequest => {
+                                if let Ok(permit) = proof_slots.clone().try_acquire_owned() {
+                                    tokio::spawn(async move {
+                                        let _permit = permit;
+                                        let result = tokio::time::timeout(
+                                            Duration::from_secs(10),
+                                            tokio::task::spawn_blocking(crate::hoen::runtime::migration::preflight_host),
+                                        ).await.ok().and_then(Result::ok).and_then(Result::ok);
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_secs(3),
+                                            stream.send(&ipc::Data::HoenConfigurationStatusResponse(result)),
+                                        ).await;
+                                    });
+                                }
+                            }
+                            #[cfg(feature = "hoen-mailbox")]
                             ipc::Data::HoenDirectoryRequest => {
                                 if let Ok(permit) = proof_slots.clone().try_acquire_owned() {
                                     tokio::spawn(async move {

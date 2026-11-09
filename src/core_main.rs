@@ -242,6 +242,12 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::platform::try_remove_temp_update_files();
             hbb_common::config::PeerConfig::preload_peers();
         }
+        // Once the user agent is installed, only that supervised process may
+        // host. Preserve the existing combined startup for installations that
+        // have not yet installed an agent, so an upgrade does not silently
+        // remove their only listener. Treat an unreadable agent as installed.
+        #[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+        let no_server = no_server || mac_host_agent_present(&hbb_common::config::Config::get_home());
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -748,6 +754,27 @@ pub fn core_main() -> Option<CoreMainAction> {
     return Some(CoreMainAction::StartUi(flutter_args));
     #[cfg(not(feature = "flutter"))]
     return Some(CoreMainAction::StartUi(args));
+}
+
+#[cfg(all(target_os = "macos", feature = "hoen-mailbox"))]
+fn mac_host_agent_present(home: &std::path::Path) -> bool {
+    home.join("Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist")
+        .try_exists()
+        .unwrap_or(true)
+}
+
+#[cfg(all(test, target_os = "macos", feature = "hoen-mailbox"))]
+mod mac_host_startup_tests {
+    #[test]
+    fn agent_presence_controls_migration_from_combined_host() {
+        let home = std::env::temp_dir().join(format!("hoen-agent-check-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(home.join("Library/LaunchAgents")).unwrap();
+        assert!(!super::mac_host_agent_present(&home));
+        std::fs::write(home.join("Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist"), b"fixture").unwrap();
+        assert!(super::mac_host_agent_present(&home));
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }
 
 fn import_config(path: &str) {

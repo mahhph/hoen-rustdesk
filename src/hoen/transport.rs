@@ -186,14 +186,14 @@ impl Transport {
     /// The caller must validate the selected local address before opening its listener.
     pub async fn accept(
         socket: TcpStream,
+        peer: SocketAddr,
         policy: network::Policy,
         signing_key: &sign::SecretKey,
     ) -> ResultType<Self> {
-        let local = socket.local_addr()?;
-        let peer = socket.peer_addr()?;
-        admit(policy.clone(), local, peer).await?;
+        let local = socket.local_addr().map_err(|e| anyhow!("host socket local address: {e}"))?;
+        admit(policy.clone(), local, peer).await.map_err(|e| anyhow!("host socket admission: {e}"))?;
         let mut stream = Stream::from(socket, local);
-        let channel = handshake::host(&mut stream, signing_key, &signing_key.public_key()).await?;
+        let channel = handshake::host(&mut stream, signing_key, &signing_key.public_key()).await.map_err(|e| anyhow!("host handshake: {e}"))?;
         let transport = Self {
             stream,
             channel,
@@ -317,9 +317,9 @@ mod tests {
         let (public, secret) = sign::gen_keypair();
         let fingerprint: [u8; 32] = Sha256::digest(public.0).into();
         let host = hbb_common::tokio::spawn(async move {
-            let (socket, _) = listener.accept().await.unwrap();
+            let (socket, peer) = listener.accept().await.unwrap();
             let policy = network::Policy { local_address: address.ip() };
-            Transport::accept(socket, policy, &secret).await.unwrap()
+            Transport::accept(socket, peer, policy, &secret).await.unwrap()
         });
         let socket = TcpStream::connect(address).await.unwrap();
         let mut viewer = Stream::from(socket, address);
@@ -336,12 +336,12 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (client, accepted) =
             hbb_common::tokio::join!(TcpStream::connect(address), listener.accept(),);
-        let (socket, _) = accepted.unwrap();
+        let (socket, peer) = accepted.unwrap();
         let (_, signing_key) = sign::gen_keypair();
         let policy = network::Policy {
             local_address: "127.0.0.2".parse().unwrap(),
         };
-        assert!(Transport::accept(socket, policy, &signing_key)
+        assert!(Transport::accept(socket, peer, policy, &signing_key)
             .await
             .is_err());
 

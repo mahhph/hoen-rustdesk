@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'mailbox_diagnostics_page.dart';
 
 /// Directory data contains registration status, not live availability.
 class MailboxHomePage extends StatefulWidget {
@@ -137,8 +138,6 @@ class _MailboxHomePageState extends State<MailboxHomePage> with WidgetsBindingOb
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Remote Desktop Client',
                 style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 4),
-            Text('Build: $_buildId', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             const Text('Choose a computer to connect to.'),
             if (_identity != null) ...[
@@ -180,6 +179,11 @@ class _MailboxHomePageState extends State<MailboxHomePage> with WidgetsBindingOb
               OutlinedButton(
                   onPressed: _loading ? null : _refresh,
                   child: const Text('Refresh')),
+              OutlinedButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => MailboxDiagnosticsPage(
+                          loadDirectory: widget.loadDirectory, buildId: _buildId))),
+                  child: const Text('About & diagnostics')),
             ]),
             const SizedBox(height: 10),
             Text('Registered does not mean online.',

@@ -84,3 +84,35 @@ The following commands are development setup operations for the signed applicati
 - `--hoen-import-host` reads the validated enrollment bundle only from standard input and saves it to the user's Keychain.
 
 The code and synthetic tests do not establish production readiness. A stable signing identity, a real Windows-to-Mac session, capture and input permission checks, reboot transitions, and complete interactive session tests remain necessary. The macOS network observer and Keychain behavior must also be verified in any installed launch-agent context. A login-time address change only works when the mailbox service itself remains reachable and its TLS identity still validates.
+
+## Separate development host (logged-in user)
+
+After the Hoen user launch agent is installed, the Mac client must not start an
+in-process host when host IPC is absent. Until then, upgrades preserve the old
+combined startup so they do not silently remove an existing listener. An
+unreadable agent path is treated as installed. A separate, supervised
+`HoenRemoteDev --server` process owns the
+existing user Keychain enrollment, host IPC and listener. The two processes use
+the same signed app executable and identity, but the host does not share the
+client window's lifetime. The supervisor is a per-user Aqua LaunchAgent with
+`RunAtLoad`, `KeepAlive` and a 15-second launch throttle. It is not a pre-login
+service. The host's stop-hosting setting still controls the listener.
+
+For the November 8 development trial the LaunchAgent at
+`~/Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist` points to the
+installed development app and uses the `--server` argument. Closing the client
+left the host listening; terminating the host caused launchd to restart it and
+its listener sent an initial handshake. The user confirmed that an active remote
+session remained usable after the client window closed. An actual logout/login
+remains a separate acceptance test.
+Removing or disabling the agent must not delete the app, Keychain entries, or
+mailbox state. Do not replace a pre-existing agent without checking ownership.
+
+To prepare an agent for review, run
+`python3 scripts/prepare-hoen-mac-host-agent.py --app /absolute/path/HoenRemoteDev.app --output /absolute/path/host.plist`.
+It verifies the development bundle and signature, refuses to overwrite its
+output, and does not install or start anything. Review its executable path and
+the existing user's launch agents before installing the plist to
+`~/Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist` and bootstrapping
+it in the intended user's GUI domain. This development-only preparation is not
+a production installer or an automatic upgrade procedure.

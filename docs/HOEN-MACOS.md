@@ -99,7 +99,17 @@ For the November 8 development trial the LaunchAgent at
 `~/Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist` points to the
 installed development app and uses the `--server` argument. Closing the client
 left the host listening; terminating the host caused launchd to restart it and
-its listener sent an initial handshake. An actual logout/login and a complete
-remote session after the supervision change remain separate acceptance tests.
+its listener sent an initial handshake. The user confirmed that an active remote
+session remained usable after the client window closed. An actual logout/login
+remains a separate acceptance test.
 Removing or disabling the agent must not delete the app, Keychain entries, or
 mailbox state. Do not replace a pre-existing agent without checking ownership.
+
+To prepare an agent for review, run
+`python3 scripts/prepare-hoen-mac-host-agent.py --app /absolute/path/HoenRemoteDev.app --output /absolute/path/host.plist`.
+It verifies the development bundle and signature, refuses to overwrite its
+output, and does not install or start anything. Review its executable path and
+the existing user's launch agents before installing the plist to
+`~/Library/LaunchAgents/com.hoensolutions.hoenremote.host.plist` and bootstrapping
+it in the intended user's GUI domain. This development-only preparation is not
+a production installer or an automatic upgrade procedure.

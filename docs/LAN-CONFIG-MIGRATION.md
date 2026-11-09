@@ -19,3 +19,7 @@ No installation or activation is supplied by this checkpoint. Protected backup/s
 Older binaries reject the new metadata field under their strict enrollment parser. Keep the original encrypted enrollment backup and a verified compatible rollback package; never assume an old executable can read a migrated record. Do not erase or replace the existing protected enrollment during this checkpoint.
 
 Regression surface: runtime.rs accepts and validates the optional field and initializes it as absent during legacy bootstrap; all ordinary load/init/auth paths otherwise remain unchanged. enrollment.rs adds only the explicit Windows read-only command. Migration logic is isolated in runtime_migration.rs. No live configuration or security policy is modified.
+
+## Windows service status request
+
+The Windows service accepts a bounded `HoenConfigurationStatusRequest` only after its existing active-session, local-pipe and executable authorization checks. It runs the read-only protected-store preflight on a blocking worker and returns its public metadata and public-key fingerprint, or an unavailable response. The metadata describes a proposed migration revision, not a committed or active configuration; `activationReady` and `authenticatedMailboxVerified` remain false. It exposes no bearer, key seed or arbitrary secret read. This is not yet wired into the mailbox app or watcher, and it does not authorize a switch. Actual protected LocalSystem and unauthorized-caller integration tests remain required before release.

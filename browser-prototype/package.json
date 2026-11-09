@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": { "test": "node --test", "gateway": "node gateway.mjs" },
-  "dependencies": { "ws": "8.22.2" },
+  "dependencies": { "@noble/hashes": "1.8.0", "tweetnacl": "1.0.3", "ws": "8.22.2" },
   "engines": { "node": ">=20" }
 }

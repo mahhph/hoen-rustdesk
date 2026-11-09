@@ -7,6 +7,16 @@ import { Viewer } from '../vendor/rdweb/src/viewer';
 const connect=document.querySelector<HTMLButtonElement>('#connect')!;
 const computer=document.querySelector<HTMLSelectElement>('#computer')!;
 const files=document.querySelector<HTMLButtonElement>('#files')!;
+const toolbar=document.querySelector<HTMLElement>('#toolbar')!;
+const toolbarToggle=document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
+function collapseToolbar(collapsed:boolean){
+ toolbar.classList.toggle('collapsed',collapsed);
+ toolbarToggle.textContent=collapsed?'⌄ Menu':'⌃ Hide';
+ toolbarToggle.setAttribute('aria-expanded',String(!collapsed));
+ toolbarToggle.setAttribute('aria-label',collapsed?'Show toolbar':'Hide toolbar');
+ toolbarToggle.title=collapsed?'Show toolbar':'Hide toolbar';
+}
+toolbarToggle.onclick=()=>collapseToolbar(!toolbar.classList.contains('collapsed'));
 const disconnect=document.querySelector<HTMLButtonElement>('#disconnect')!;
 const status=document.querySelector<HTMLElement>('#status')!;
 const area=document.querySelector<HTMLElement>('#viewer')!;
@@ -35,8 +45,8 @@ async function start() {
     files.onclick=()=>void openFiles(options);
     viewer?.destroy(); viewer=new Viewer(area,session); displayControls(session,viewer);
     session.on('state',({state})=>{status.textContent=state==='connected'?'Connected':`Connecting: ${state}`;});
-    session.on('connected',()=>{status.textContent='Connected';disconnect.disabled=false;viewer?.focus();keyboard.disabled=false;files.disabled=false;});
-    session.on('close',({reason})=>{status.textContent=`Disconnected: ${reason}`;disconnect.disabled=true;keyboard.disabled=true;files.disabled=true;computer.disabled=false;viewer?.destroy();viewer=null;connect.disabled=false;});
+    session.on('connected',()=>{status.textContent='Connected';disconnect.disabled=false;viewer?.focus();keyboard.disabled=false;files.disabled=false;collapseToolbar(true);});
+    session.on('close',({reason})=>{status.textContent=`Disconnected: ${reason}`;disconnect.disabled=true;keyboard.disabled=true;files.disabled=true;computer.disabled=false;viewer?.destroy();viewer=null;connect.disabled=false;collapseToolbar(false);});
     await session.connect();
   } catch(error) { status.textContent=error instanceof Error?error.message:'Connection failed.'; session?.close(); session=null;connect.disabled=false;computer.disabled=false; }
 }

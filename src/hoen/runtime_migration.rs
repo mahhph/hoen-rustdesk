@@ -95,6 +95,32 @@ pub(crate) fn prepare(secret: &Secret, expected_revision: u64) -> ResultType<Sec
         .map_err(|_| anyhow!("prepared enrollment exceeds protected-store limits"))
 }
 
+/// Read the existing role entry only. No provisioning, store write, or activation.
+#[cfg(target_os = "macos")]
+pub(crate) fn preflight_mac(
+    purpose: crate::hoen::credentials::Purpose,
+    expected_revision: u64,
+) -> ResultType<String> {
+    use crate::hoen::credentials::{CredentialStore, MacStore};
+    let store = MacStore::for_user(purpose)
+        .map_err(|_| anyhow!("user Keychain unavailable for configuration preflight"))?;
+    let original = store.read()
+        .map_err(|_| anyhow!("protected enrollment unavailable for configuration preflight"))?;
+    let prepared = prepare(&original, expected_revision)?;
+    let candidate = parse(prepared.expose())?;
+    if purpose == crate::hoen::credentials::Purpose::HostService && !candidate.hosting_enabled {
+        bail!("protected host enrollment has incompatible role");
+    }
+    let (public, _) = super::sign::keypair_from_seed(&super::sign::Seed(candidate.signing_seed));
+    let fingerprint = super::Fingerprint::from_bytes(Sha256::digest(public.0).into()).to_hex();
+    Ok(serde_json::json!({
+        "status":"prepared_in_memory_only", "currentRevision":expected_revision,
+        "proposedConfiguration":candidate.machine_config.as_ref(),
+        "publicKeyFingerprint":fingerprint,
+        "activationReady":false, "authenticatedMailboxVerified":false
+    }).to_string())
+}
+
 #[cfg(windows)]
 pub(crate) fn preflight_host() -> ResultType<String> {
     use crate::hoen::credentials::{CredentialStore, ProtectedStore, Purpose};
